@@ -206,6 +206,78 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         let points = chunk::read_points_range(chunk, &self.header.las_header, range)?;
         Ok(filter_points_by_bounds(points, bounds))
     }
+
+    // --- High-level queries ---
+
+    /// Load hierarchy and return all points inside `bounds`.
+    ///
+    /// This is the simplest way to query a spatial region. It loads the
+    /// hierarchy pages that overlap `bounds`, fetches and decompresses
+    /// matching chunks, and returns only the points inside the bounding box.
+    ///
+    /// ```rust,ignore
+    /// let points = reader.query_points(&my_query_box).await?;
+    /// ```
+    pub async fn query_points(
+        &mut self,
+        bounds: &crate::types::Aabb,
+    ) -> Result<Vec<las::Point>, CopcError> {
+        self.load_hierarchy_for_bounds(bounds).await?;
+        let root_bounds = self.header.copc_info.root_bounds();
+
+        let keys: Vec<VoxelKey> = self
+            .hierarchy
+            .iter()
+            .filter(|(k, e)| e.point_count > 0 && k.bounds(&root_bounds).intersects(bounds))
+            .map(|(k, _)| *k)
+            .collect();
+
+        let mut all_points = Vec::new();
+        for key in keys {
+            let chunk = self.fetch_chunk(&key).await?;
+            let points = self.read_points_in_bounds(&chunk, bounds)?;
+            all_points.extend(points);
+        }
+        Ok(all_points)
+    }
+
+    /// Load hierarchy to `max_level` and return all points inside `bounds`.
+    ///
+    /// Like [`query_points`](Self::query_points) but limits the octree depth.
+    /// Use with [`CopcInfo::level_for_resolution`] for LOD control:
+    ///
+    /// ```rust,ignore
+    /// let level = reader.copc_info().level_for_resolution(0.5);
+    /// let points = reader.query_points_to_level(&visible_box, level).await?;
+    /// ```
+    pub async fn query_points_to_level(
+        &mut self,
+        bounds: &crate::types::Aabb,
+        max_level: i32,
+    ) -> Result<Vec<las::Point>, CopcError> {
+        self.load_hierarchy_for_bounds_to_level(bounds, max_level)
+            .await?;
+        let root_bounds = self.header.copc_info.root_bounds();
+
+        let keys: Vec<VoxelKey> = self
+            .hierarchy
+            .iter()
+            .filter(|(k, e)| {
+                e.point_count > 0
+                    && k.level <= max_level
+                    && k.bounds(&root_bounds).intersects(bounds)
+            })
+            .map(|(k, _)| *k)
+            .collect();
+
+        let mut all_points = Vec::new();
+        for key in keys {
+            let chunk = self.fetch_chunk(&key).await?;
+            let points = self.read_points_in_bounds(&chunk, bounds)?;
+            all_points.extend(points);
+        }
+        Ok(all_points)
+    }
 }
 
 /// Filter points to only those inside an axis-aligned bounding box.
@@ -223,15 +295,5 @@ pub fn filter_points_by_bounds(
                 && p.z >= bounds.min[2]
                 && p.z <= bounds.max[2]
         })
-        .collect()
-}
-
-/// Filter points to only those whose GPS time falls within `[start, end]`.
-///
-/// Points without a GPS time are excluded.
-pub fn filter_points_by_time(points: Vec<las::Point>, start: f64, end: f64) -> Vec<las::Point> {
-    points
-        .into_iter()
-        .filter(|p| p.gps_time.is_some_and(|t| t >= start && t <= end))
         .collect()
 }

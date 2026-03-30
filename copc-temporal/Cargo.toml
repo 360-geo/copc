@@ -11,6 +11,7 @@ readme = "../README.md"
 
 [dependencies]
 copc-streaming = { path = "../copc-streaming" }
+las = { version = "0.9", features = ["laz"] }
 byteorder = "1"
 thiserror = "2"
 [dev-dependencies]

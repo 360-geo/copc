@@ -88,14 +88,19 @@ impl CopcInfo {
         }
     }
 
-    /// Compute the octree level that corresponds to a given point spacing.
+    /// Compute the octree level needed for a given point spacing (in the
+    /// same units as the point coordinates, typically meters).
     ///
-    /// At level 0 the node spacing equals [`CopcInfo::spacing`]. Each deeper
-    /// level halves it. This returns the deepest level whose spacing is still
-    /// ≥ `resolution`.
+    /// At level 0 the average distance between points equals
+    /// [`CopcInfo::spacing`]. Each deeper level halves the distance. This
+    /// returns the shallowest level where the point spacing is ≤ `resolution`.
     ///
-    /// Useful for LOD selection: pass the desired ground-sample distance and
-    /// use the returned level as `max_level` in
+    /// For example, if the file's base spacing is 10 m and you request 0.5 m,
+    /// you get level 5 (10 → 5 → 2.5 → 1.25 → 0.625 → 0.3125).
+    ///
+    /// Use the returned level as `max_level` in
+    /// [`CopcStreamingReader::query_points_to_level`](crate::CopcStreamingReader::query_points_to_level)
+    /// or
     /// [`CopcStreamingReader::load_hierarchy_for_bounds_to_level`](crate::CopcStreamingReader::load_hierarchy_for_bounds_to_level).
     pub fn level_for_resolution(&self, resolution: f64) -> i32 {
         if resolution <= 0.0 || self.spacing <= 0.0 {

@@ -45,23 +45,20 @@ When multiple survey passes cover the same area at different times, a single mer
 ## Quick start
 
 ```rust
-use copc_streaming::{CopcStreamingReader, FileSource, VoxelKey};
+use copc_streaming::{Aabb, CopcStreamingReader, FileSource};
 
 let mut reader = CopcStreamingReader::open(FileSource::open("points.copc.laz")?).await?;
 
-// Coarse nodes are available immediately. Load finer levels as needed.
-let root_bounds = reader.copc_info().root_bounds();
+// One call: loads hierarchy, fetches chunks, filters points.
+let points = reader.query_points(&query_box).await?;
+```
 
-// Load only hierarchy pages whose subtree intersects the query region.
-reader.load_hierarchy_for_bounds(&query_box).await?;
+### With LOD control
 
-for (key, entry) in reader.entries() {
-    if entry.point_count == 0 { continue; }
-    if !key.bounds(&root_bounds).intersects(&query_box) { continue; }
-
-    let chunk = reader.fetch_chunk(key).await?;
-    let points = reader.read_points(&chunk)?;
-}
+```rust
+// Load points with at most 0.5 m between samples.
+let level = reader.copc_info().level_for_resolution(0.5);
+let points = reader.query_points_to_level(&query_box, level).await?;
 ```
 
 ### With temporal filtering
@@ -73,18 +70,8 @@ if let Some(mut temporal) = TemporalCache::from_reader(&reader).await? {
     let start = GpsTime(1_000_000.0);
     let end   = GpsTime(1_000_010.0);
 
-    // Query loads only the index pages needed, then returns matching nodes.
-    for entry in temporal.query(reader.source(), start, end).await? {
-        let hier = reader.get(&entry.key).unwrap();
-        if !entry.key.bounds(&root_bounds).intersects(&query_box) { continue; }
-
-        // Read only the points that fall within the time window.
-        let range = entry.estimate_point_range(
-            start, end, temporal.stride(), hier.point_count,
-        );
-        let chunk = reader.fetch_chunk(&entry.key).await?;
-        let points = reader.read_points_range(&chunk, range)?;
-    }
+    // Loads hierarchy + temporal pages, fetches chunks, filters by bounds AND time.
+    let points = temporal.query_points(&mut reader, &query_box, start, end).await?;
 }
 ```
 

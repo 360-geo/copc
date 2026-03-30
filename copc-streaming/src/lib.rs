@@ -14,33 +14,38 @@
 //!     FileSource::open("points.copc.laz")?,
 //! ).await?;
 //!
-//! let root_bounds = reader.copc_info().root_bounds();
-//!
-//! // Load only the hierarchy pages that cover the region you care about.
-//! reader.load_hierarchy_for_bounds(&my_query_box).await?;
-//!
-//! // Walk loaded nodes — only those intersecting the query box.
-//! for (key, entry) in reader.entries() {
-//!     if entry.point_count == 0 { continue; }
-//!     if !key.bounds(&root_bounds).intersects(&my_query_box) { continue; }
-//!
-//!     let chunk = reader.fetch_chunk(key).await?;
-//!     let points = reader.read_points(&chunk)?;
-//!     // each `point` has .x, .y, .z, .gps_time, .color, etc.
-//! }
+//! // One call: loads hierarchy, fetches chunks, filters points by bounds.
+//! let points = reader.query_points(&my_query_box).await?;
+//! // each `point` has .x, .y, .z, .gps_time, .color, etc.
 //! ```
 //!
-//! # Load everything at once
+//! # With LOD control
 //!
-//! If you don't need spatial filtering, pull the full hierarchy in one call:
+//! ```rust,ignore
+//! // Load points with at most 0.5 m between samples.
+//! let level = reader.copc_info().level_for_resolution(0.5);
+//! let points = reader.query_points_to_level(&my_query_box, level).await?;
+//! ```
+//!
+//! # Low-level access
+//!
+//! For full control over hierarchy loading and chunk processing:
 //!
 //! ```rust,ignore
 //! let mut reader = CopcStreamingReader::open(
 //!     FileSource::open("points.copc.laz")?,
 //! ).await?;
-//! reader.load_all_hierarchy().await?;
 //!
-//! // Every node is now available via reader.entries() / reader.get().
+//! let root_bounds = reader.copc_info().root_bounds();
+//! reader.load_hierarchy_for_bounds(&my_query_box).await?;
+//!
+//! for (key, entry) in reader.entries() {
+//!     if entry.point_count == 0 { continue; }
+//!     if !key.bounds(&root_bounds).intersects(&my_query_box) { continue; }
+//!
+//!     let chunk = reader.fetch_chunk(key).await?;
+//!     let points = reader.read_points_in_bounds(&chunk, &my_query_box)?;
+//! }
 //! ```
 //!
 //! # Hierarchy loading
@@ -101,5 +106,8 @@ pub use error::CopcError;
 pub use file_source::FileSource;
 pub use header::{CopcHeader, CopcInfo};
 pub use hierarchy::{HierarchyCache, HierarchyEntry};
-pub use reader::{CopcStreamingReader, filter_points_by_bounds, filter_points_by_time};
+pub use reader::{CopcStreamingReader, filter_points_by_bounds};
 pub use types::{Aabb, VoxelKey};
+
+/// Re-export `las::Point` — the point type returned by all read methods.
+pub use las::Point;

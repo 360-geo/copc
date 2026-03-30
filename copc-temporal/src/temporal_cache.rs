@@ -232,6 +232,117 @@ impl TemporalCache {
         self.entries.iter()
     }
 
+    // --- High-level queries ---
+
+    /// Query points by time range and spatial bounds.
+    ///
+    /// Loads the relevant hierarchy and temporal pages, fetches matching
+    /// chunks, and returns only the points that fall inside both the time
+    /// window and the bounding box.
+    ///
+    /// ```rust,ignore
+    /// let points = temporal.query_points(
+    ///     &mut reader, &query_box, start, end,
+    /// ).await?;
+    /// ```
+    pub async fn query_points<S: ByteSource>(
+        &mut self,
+        reader: &mut CopcStreamingReader<S>,
+        bounds: &copc_streaming::Aabb,
+        start: GpsTime,
+        end: GpsTime,
+    ) -> Result<Vec<las::Point>, TemporalError> {
+        // Load spatial hierarchy for the region.
+        reader
+            .load_hierarchy_for_bounds(bounds)
+            .await
+            .map_err(TemporalError::Copc)?;
+
+        // Load temporal pages that overlap the time range.
+        self.load_pages_for_time_range(reader.source(), start, end)
+            .await?;
+
+        let root_bounds = reader.copc_info().root_bounds();
+        let stride = self.stride;
+
+        // Collect matching (key, point_range) pairs.
+        let matches: Vec<_> = self
+            .nodes_in_range(start, end)
+            .into_iter()
+            .filter(|e| e.key.bounds(&root_bounds).intersects(bounds))
+            .filter_map(|e| {
+                let hier = reader.get(&e.key)?;
+                let range = e.estimate_point_range(start, end, stride, hier.point_count);
+                if range.is_empty() {
+                    return None;
+                }
+                Some((e.key, range))
+            })
+            .collect();
+
+        let mut all_points = Vec::new();
+        for (key, range) in matches {
+            let chunk = reader
+                .fetch_chunk(&key)
+                .await
+                .map_err(TemporalError::Copc)?;
+            let points = reader
+                .read_points_range_in_bounds(&chunk, range, bounds)
+                .map_err(TemporalError::Copc)?;
+            let points = crate::filter_points_by_time(points, start, end);
+            all_points.extend(points);
+        }
+        Ok(all_points)
+    }
+
+    /// Query points by time range only (no spatial filtering).
+    ///
+    /// Loads all hierarchy pages and temporal pages that overlap the time
+    /// range, then returns points within the time window.
+    pub async fn query_points_by_time<S: ByteSource>(
+        &mut self,
+        reader: &mut CopcStreamingReader<S>,
+        start: GpsTime,
+        end: GpsTime,
+    ) -> Result<Vec<las::Point>, TemporalError> {
+        reader
+            .load_all_hierarchy()
+            .await
+            .map_err(TemporalError::Copc)?;
+
+        self.load_pages_for_time_range(reader.source(), start, end)
+            .await?;
+
+        let stride = self.stride;
+
+        let matches: Vec<_> = self
+            .nodes_in_range(start, end)
+            .into_iter()
+            .filter_map(|e| {
+                let hier = reader.get(&e.key)?;
+                let range = e.estimate_point_range(start, end, stride, hier.point_count);
+                if range.is_empty() {
+                    return None;
+                }
+                Some((e.key, range))
+            })
+            .collect();
+
+        let mut all_points = Vec::new();
+        for (key, range) in matches {
+            let chunk = reader
+                .fetch_chunk(&key)
+                .await
+                .map_err(TemporalError::Copc)?;
+            let points = reader
+                .read_points_range(&chunk, range)
+                .map_err(TemporalError::Copc)?;
+            let points = crate::filter_points_by_time(points, start, end);
+            all_points.extend(points);
+        }
+        Ok(all_points)
+    }
+
     fn parse_page(&mut self, data: &[u8]) -> Result<(), TemporalError> {
         let mut r = Cursor::new(data);
 
