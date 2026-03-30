@@ -8,28 +8,21 @@
 //! # Quick start
 //!
 //! ```rust,ignore
-//! use copc_streaming::{CopcStreamingReader, FileSource, VoxelKey};
+//! use copc_streaming::{Aabb, CopcStreamingReader, FileSource};
 //!
 //! let mut reader = CopcStreamingReader::open(
 //!     FileSource::open("points.copc.laz")?,
 //! ).await?;
 //!
-//! // Coarse octree nodes are available immediately.
-//! // Load deeper hierarchy pages as you need them.
 //! let root_bounds = reader.copc_info().root_bounds();
 //!
-//! while reader.has_pending_pages() {
-//!     reader.load_pending_pages().await?;
-//! }
+//! // Load only the hierarchy pages that cover the region you care about.
+//! reader.load_hierarchy_for_bounds(&my_query_box).await?;
 //!
-//! // Walk the octree — check which nodes intersect your region.
+//! // Walk loaded nodes — only those intersecting the query box.
 //! for (key, entry) in reader.entries() {
 //!     if entry.point_count == 0 { continue; }
 //!     if !key.bounds(&root_bounds).intersects(&my_query_box) { continue; }
-//!
-//!     // Drill into finer nodes when available.
-//!     let finer = reader.children(key);
-//!     if !finer.is_empty() { continue; } // render children instead
 //!
 //!     let chunk = reader.fetch_chunk(key).await?;
 //!     let points = reader.read_points(&chunk)?;
@@ -39,7 +32,7 @@
 //!
 //! # Load everything at once
 //!
-//! If you don't need progressive loading, pull the full hierarchy in one call:
+//! If you don't need spatial filtering, pull the full hierarchy in one call:
 //!
 //! ```rust,ignore
 //! let mut reader = CopcStreamingReader::open(
@@ -52,18 +45,28 @@
 //!
 //! # Hierarchy loading
 //!
-//! [`CopcStreamingReader::open`] reads the LAS header, COPC info and root hierarchy
-//! page. Coarse octree nodes are available right away. Deeper pages are loaded
-//! on demand:
+//! The COPC hierarchy is stored as a tree of *pages*. Each page contains metadata
+//! for a group of octree nodes (typically several levels deep) plus pointers to
+//! child pages covering deeper subtrees.
+//!
+//! [`CopcStreamingReader::open`] reads the LAS header, COPC info, and the **root
+//! hierarchy page**. This gives you the coarse octree nodes immediately (often
+//! levels 0–3, depending on the file). Any subtrees stored in separate pages
+//! are tracked as *pending pages* — they haven't been fetched yet.
+//!
+//! You then control when and which deeper pages are loaded:
 //!
 //! - [`load_hierarchy_for_bounds`](CopcStreamingReader::load_hierarchy_for_bounds) —
-//!   load only pages whose subtree intersects a bounding box. Ideal for spatial
-//!   queries over a small region of a large file.
+//!   load only pages whose subtree intersects a bounding box. Call this when the
+//!   camera moves or a spatial query arrives.
 //! - [`load_pending_pages`](CopcStreamingReader::load_pending_pages) — fetch the
-//!   next level of pages. Call repeatedly, or only when you need finer detail.
+//!   next batch of pending pages (all of them). Useful when you don't need spatial
+//!   filtering and just want to go one level deeper.
 //! - [`load_all_hierarchy`](CopcStreamingReader::load_all_hierarchy) — convenience
 //!   to pull every remaining page in one go.
 //! - [`children`](CopcStreamingReader::children) — list loaded children of a node.
+//!   Returns only children already in the cache; if deeper pages haven't been
+//!   loaded yet this may return fewer than exist in the file.
 //! - [`has_pending_pages`](CopcStreamingReader::has_pending_pages) — check if there
 //!   are still unloaded pages.
 //!

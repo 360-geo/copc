@@ -9,7 +9,7 @@ Rust libraries for reading [COPC](https://copc.io/) (Cloud-Optimized Point Cloud
 
 ## Crates
 
-### [`copc-streaming`](copc-streaming/)
+### [`copc-streaming`](./copc-streaming)
 
 [![Crates.io](https://img.shields.io/crates/v/copc-streaming)](https://crates.io/crates/copc-streaming)
 [![docs.rs](https://docs.rs/copc-streaming/badge.svg)](https://docs.rs/copc-streaming)
@@ -23,7 +23,7 @@ Async streaming COPC reader. Loads octree hierarchy and point data incrementally
 - `ByteSource` trait with `FileSource` (local) and `Vec<u8>` (in-memory) implementations
 - No `Send` requirement on futures — WASM compatible
 
-### [`copc-temporal`](copc-temporal/)
+### [`copc-temporal`](./copc-temporal)
 
 [![Crates.io](https://img.shields.io/crates/v/copc-temporal)](https://crates.io/crates/copc-temporal)
 [![docs.rs](https://docs.rs/copc-temporal/badge.svg)](https://docs.rs/copc-temporal)
