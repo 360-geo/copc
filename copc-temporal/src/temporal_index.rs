@@ -13,6 +13,7 @@ use crate::vlr::VlrData;
 /// Per-node temporal data: a set of sampled GPS timestamps.
 #[derive(Debug, Clone)]
 pub struct NodeTemporalEntry {
+    /// The octree node this entry describes.
     pub key: VoxelKey,
     samples: Vec<GpsTime>,
 }

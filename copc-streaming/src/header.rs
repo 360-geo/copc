@@ -54,12 +54,19 @@ impl CopcHeader {
 /// COPC info VLR payload (160 bytes). This is COPC-specific — not part of the LAS standard.
 #[derive(Debug, Clone)]
 pub struct CopcInfo {
+    /// Centre of the root octree cube `[x, y, z]`.
     pub center: [f64; 3],
+    /// Half the side length of the root octree cube.
     pub halfsize: f64,
+    /// Spacing at the finest octree level.
     pub spacing: f64,
+    /// File offset of the root hierarchy page.
     pub root_hier_offset: u64,
+    /// Size of the root hierarchy page in bytes.
     pub root_hier_size: u64,
+    /// Minimum GPS time across all points.
     pub gpstime_minimum: f64,
+    /// Maximum GPS time across all points.
     pub gpstime_maximum: f64,
 }
 

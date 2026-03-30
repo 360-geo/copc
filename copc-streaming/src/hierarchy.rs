@@ -15,6 +15,7 @@ use crate::header::CopcInfo;
 /// A single hierarchy entry: metadata for one octree node.
 #[derive(Debug, Clone)]
 pub struct HierarchyEntry {
+    /// The octree node this entry describes.
     pub key: VoxelKey,
     /// Absolute file offset to the compressed point data.
     pub offset: u64,
@@ -48,6 +49,7 @@ impl Default for HierarchyCache {
 }
 
 impl HierarchyCache {
+    /// Create an empty hierarchy cache.
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
@@ -124,6 +126,7 @@ impl HierarchyCache {
         self.entries.len()
     }
 
+    /// Whether no entries have been loaded.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

@@ -11,10 +11,13 @@ use crate::types::VoxelKey;
 
 /// A decompressed point data chunk.
 pub struct DecompressedChunk {
+    /// The octree node this chunk belongs to.
     pub key: VoxelKey,
     /// Raw decompressed point record bytes.
     pub data: Vec<u8>,
+    /// Number of points in this chunk.
     pub point_count: u32,
+    /// Size of a single point record in bytes.
     pub point_record_length: u16,
 }
 

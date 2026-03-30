@@ -16,11 +16,17 @@ use crate::temporal_index::NodeTemporalEntry;
 /// Header of the temporal index EVLR (32 bytes).
 #[derive(Debug, Clone)]
 pub struct TemporalHeader {
+    /// Format version (must be 1).
     pub version: u32,
+    /// Sampling stride — every N-th point is recorded.
     pub stride: u32,
+    /// Total number of node entries across all pages.
     pub node_count: u32,
+    /// Total number of pages.
     pub page_count: u32,
+    /// Absolute file offset of the root page.
     pub root_page_offset: u64,
+    /// Size of the root page in bytes.
     pub root_page_size: u32,
 }
 
@@ -47,6 +53,7 @@ impl Default for TemporalCache {
 }
 
 impl TemporalCache {
+    /// Create an empty temporal cache.
     pub fn new() -> Self {
         Self {
             header: None,
@@ -172,10 +179,12 @@ impl TemporalCache {
         Ok(())
     }
 
+    /// Look up the temporal entry for a node.
     pub fn get(&self, key: &VoxelKey) -> Option<&NodeTemporalEntry> {
         self.entries.get(key)
     }
 
+    /// Return all loaded nodes whose time range overlaps `[start, end]`.
     pub fn nodes_in_range(&self, start: GpsTime, end: GpsTime) -> Vec<&NodeTemporalEntry> {
         self.entries
             .values()
@@ -183,18 +192,22 @@ impl TemporalCache {
             .collect()
     }
 
+    /// The sampling stride (every N-th point is recorded in the index).
     pub fn stride(&self) -> u32 {
         self.stride
     }
 
+    /// The parsed temporal index header, if loaded.
     pub fn header(&self) -> Option<&TemporalHeader> {
         self.header.as_ref()
     }
 
+    /// Number of loaded node entries.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Whether no node entries have been loaded.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

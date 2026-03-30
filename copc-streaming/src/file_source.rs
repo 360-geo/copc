@@ -17,6 +17,7 @@ pub struct FileSource {
 }
 
 impl FileSource {
+    /// Open a local file as a byte source.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, CopcError> {
         let file = std::fs::File::open(path)?;
         let size = file.metadata()?.len();
