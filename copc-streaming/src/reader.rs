@@ -74,6 +74,18 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         self.hierarchy.iter()
     }
 
+    /// Return loaded child entries for a given node.
+    ///
+    /// Only returns children that are already in the hierarchy cache.
+    /// If deeper hierarchy pages haven't been loaded yet, this may
+    /// return fewer children than actually exist in the file.
+    pub fn children(&self, key: &VoxelKey) -> Vec<&HierarchyEntry> {
+        key.children()
+            .iter()
+            .filter_map(|child| self.hierarchy.get(child))
+            .collect()
+    }
+
     /// Number of loaded hierarchy entries.
     pub fn node_count(&self) -> usize {
         self.hierarchy.len()

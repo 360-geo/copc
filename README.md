@@ -45,15 +45,38 @@ When multiple survey passes cover the same area at different times, a single mer
 ## Quick start
 
 ```rust
-use copc_streaming::{CopcStreamingReader, FileSource};
-use copc_temporal::{TemporalCache, GpsTime};
+use copc_streaming::{CopcStreamingReader, FileSource, VoxelKey};
 
 let mut reader = CopcStreamingReader::open(FileSource::open("points.copc.laz")?).await?;
-reader.load_all_hierarchy().await?;
 
+// Coarse nodes are available immediately. Load finer levels as needed.
+let root_bounds = reader.copc_info().root_bounds();
+
+while reader.has_pending_pages() {
+    reader.load_pending_pages().await?;
+}
+
+for (key, entry) in reader.entries() {
+    if entry.point_count <= 0 { continue; }
+    if !key.bounds(&root_bounds).intersects(&query_box) { continue; }
+
+    let chunk = reader.fetch_chunk(key).await?;
+    let points = reader.read_points(&chunk)?;
+}
+```
+
+### With temporal filtering
+
+```rust
+use copc_temporal::{GpsTime, TemporalCache};
+
+// Load only temporal index pages that overlap the time range.
 if let Some(mut temporal) = TemporalCache::from_reader(&reader).await? {
-    temporal.load_all_pages(reader.source()).await?;
-    let matching = temporal.nodes_in_range(GpsTime(start), GpsTime(end));
+    let start = GpsTime(1_000_000.0);
+    let end   = GpsTime(1_000_010.0);
+    temporal.load_pages_for_time_range(reader.source(), start, end).await?;
+
+    let matching = temporal.nodes_in_range(start, end);
 }
 ```
 

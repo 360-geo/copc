@@ -12,6 +12,27 @@ pub struct VoxelKey {
 }
 
 impl VoxelKey {
+    /// The root octree node.
+    pub const ROOT: VoxelKey = VoxelKey {
+        level: 0,
+        x: 0,
+        y: 0,
+        z: 0,
+    };
+
+    /// Return the parent key, or `None` for the root node.
+    pub fn parent(&self) -> Option<VoxelKey> {
+        if self.level == 0 {
+            return None;
+        }
+        Some(VoxelKey {
+            level: self.level - 1,
+            x: self.x >> 1,
+            y: self.y >> 1,
+            z: self.z >> 1,
+        })
+    }
+
     /// Return the child key in the given octant direction (0–7).
     pub fn child(&self, dir: i32) -> VoxelKey {
         VoxelKey {
