@@ -1,0 +1,19 @@
+[package]
+name = "copc-streaming"
+version = "0.0.0-dev"
+edition = "2024"
+description = "Async streaming COPC (Cloud-Optimized Point Cloud) reader"
+license = "MIT"
+repository = "https://github.com/360-geo/copc"
+keywords = ["copc", "pointcloud", "lidar", "las", "streaming"]
+categories = ["science::geo", "rendering::data-formats"]
+readme = "../README.md"
+
+[dependencies]
+byteorder = "1"
+thiserror = "2"
+las = { version = "0.9", features = ["laz"] }
+laz = "0.12"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }

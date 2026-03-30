@@ -1,0 +1,17 @@
+[package]
+name = "copc-temporal"
+version = "0.0.0-dev"
+edition = "2024"
+description = "COPC Temporal Index Extension reader for time-range filtering of point clouds"
+license = "MIT"
+repository = "https://github.com/360-geo/copc"
+keywords = ["copc", "pointcloud", "lidar", "temporal", "gps-time"]
+categories = ["science::geo", "rendering::data-formats"]
+readme = "../README.md"
+
+[dependencies]
+copc-streaming = { path = "../copc-streaming" }
+byteorder = "1"
+thiserror = "2"
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
