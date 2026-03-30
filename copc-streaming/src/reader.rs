@@ -103,6 +103,20 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         self.hierarchy.load_pending_pages(&self.source).await
     }
 
+    /// Load only hierarchy pages whose subtree intersects `bounds`.
+    ///
+    /// Pages outside the region are left pending for future calls.
+    /// Much cheaper than `load_all_hierarchy` when querying a small area.
+    pub async fn load_hierarchy_for_bounds(
+        &mut self,
+        bounds: &crate::types::Aabb,
+    ) -> Result<(), CopcError> {
+        let root_bounds = self.header.copc_info.root_bounds();
+        self.hierarchy
+            .load_pages_for_bounds(&self.source, bounds, &root_bounds)
+            .await
+    }
+
     /// Load all remaining hierarchy pages.
     pub async fn load_all_hierarchy(&mut self) -> Result<(), CopcError> {
         self.hierarchy

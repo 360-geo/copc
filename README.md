@@ -52,9 +52,8 @@ let mut reader = CopcStreamingReader::open(FileSource::open("points.copc.laz")?)
 // Coarse nodes are available immediately. Load finer levels as needed.
 let root_bounds = reader.copc_info().root_bounds();
 
-while reader.has_pending_pages() {
-    reader.load_pending_pages().await?;
-}
+// Load only hierarchy pages whose subtree intersects the query region.
+reader.load_hierarchy_for_bounds(&query_box).await?;
 
 for (key, entry) in reader.entries() {
     if entry.point_count == 0 { continue; }

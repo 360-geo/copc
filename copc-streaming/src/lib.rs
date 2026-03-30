@@ -56,6 +56,9 @@
 //! page. Coarse octree nodes are available right away. Deeper pages are loaded
 //! on demand:
 //!
+//! - [`load_hierarchy_for_bounds`](CopcStreamingReader::load_hierarchy_for_bounds) —
+//!   load only pages whose subtree intersects a bounding box. Ideal for spatial
+//!   queries over a small region of a large file.
 //! - [`load_pending_pages`](CopcStreamingReader::load_pending_pages) — fetch the
 //!   next level of pages. Call repeatedly, or only when you need finer detail.
 //! - [`load_all_hierarchy`](CopcStreamingReader::load_all_hierarchy) — convenience
