@@ -117,6 +117,27 @@ impl<S: ByteSource> CopcStreamingReader<S> {
             .await
     }
 
+    /// Load hierarchy pages intersecting `bounds`, down to `max_level`.
+    ///
+    /// Pages deeper than `max_level` are left pending even if they overlap
+    /// the bounds. Combine with [`CopcInfo::level_for_resolution`] to load
+    /// only the detail you need:
+    ///
+    /// ```rust,ignore
+    /// let level = reader.copc_info().level_for_resolution(0.5);
+    /// reader.load_hierarchy_for_bounds_to_level(&camera_box, level).await?;
+    /// ```
+    pub async fn load_hierarchy_for_bounds_to_level(
+        &mut self,
+        bounds: &crate::types::Aabb,
+        max_level: i32,
+    ) -> Result<(), CopcError> {
+        let root_bounds = self.header.copc_info.root_bounds();
+        self.hierarchy
+            .load_pages_for_bounds_to_level(&self.source, bounds, &root_bounds, max_level)
+            .await
+    }
+
     /// Load all remaining hierarchy pages.
     pub async fn load_all_hierarchy(&mut self) -> Result<(), CopcError> {
         self.hierarchy
@@ -160,4 +181,57 @@ impl<S: ByteSource> CopcStreamingReader<S> {
     ) -> Result<Vec<las::Point>, CopcError> {
         chunk::read_points_range(chunk, &self.header.las_header, range)
     }
+
+    /// Parse all points from a chunk, keeping only those inside `bounds`.
+    pub fn read_points_in_bounds(
+        &self,
+        chunk: &DecompressedChunk,
+        bounds: &crate::types::Aabb,
+    ) -> Result<Vec<las::Point>, CopcError> {
+        let points = chunk::read_points(chunk, &self.header.las_header)?;
+        Ok(filter_points_by_bounds(points, bounds))
+    }
+
+    /// Parse a sub-range of points, keeping only those inside `bounds`.
+    ///
+    /// Combines temporal range estimation with spatial filtering: first only
+    /// the points in `range` are decompressed, then points outside `bounds`
+    /// are discarded.
+    pub fn read_points_range_in_bounds(
+        &self,
+        chunk: &DecompressedChunk,
+        range: std::ops::Range<u32>,
+        bounds: &crate::types::Aabb,
+    ) -> Result<Vec<las::Point>, CopcError> {
+        let points = chunk::read_points_range(chunk, &self.header.las_header, range)?;
+        Ok(filter_points_by_bounds(points, bounds))
+    }
+}
+
+/// Filter points to only those inside an axis-aligned bounding box.
+pub fn filter_points_by_bounds(
+    points: Vec<las::Point>,
+    bounds: &crate::types::Aabb,
+) -> Vec<las::Point> {
+    points
+        .into_iter()
+        .filter(|p| {
+            p.x >= bounds.min[0]
+                && p.x <= bounds.max[0]
+                && p.y >= bounds.min[1]
+                && p.y <= bounds.max[1]
+                && p.z >= bounds.min[2]
+                && p.z <= bounds.max[2]
+        })
+        .collect()
+}
+
+/// Filter points to only those whose GPS time falls within `[start, end]`.
+///
+/// Points without a GPS time are excluded.
+pub fn filter_points_by_time(points: Vec<las::Point>, start: f64, end: f64) -> Vec<las::Point> {
+    points
+        .into_iter()
+        .filter(|p| p.gps_time.is_some_and(|t| t >= start && t <= end))
+        .collect()
 }

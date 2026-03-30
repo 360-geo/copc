@@ -88,6 +88,22 @@ impl CopcInfo {
         }
     }
 
+    /// Compute the octree level that corresponds to a given point spacing.
+    ///
+    /// At level 0 the node spacing equals [`CopcInfo::spacing`]. Each deeper
+    /// level halves it. This returns the deepest level whose spacing is still
+    /// ≥ `resolution`.
+    ///
+    /// Useful for LOD selection: pass the desired ground-sample distance and
+    /// use the returned level as `max_level` in
+    /// [`CopcStreamingReader::load_hierarchy_for_bounds_to_level`](crate::CopcStreamingReader::load_hierarchy_for_bounds_to_level).
+    pub fn level_for_resolution(&self, resolution: f64) -> i32 {
+        if resolution <= 0.0 || self.spacing <= 0.0 {
+            return 0;
+        }
+        (self.spacing / resolution).log2().ceil().max(0.0) as i32
+    }
+
     fn parse(data: &[u8]) -> Result<Self, CopcError> {
         if data.len() < 160 {
             return Err(CopcError::CopcInfoNotFound);
@@ -188,5 +204,34 @@ mod tests {
         let b = info.root_bounds();
         assert_eq!(b.min, [50.0, 150.0, -40.0]);
         assert_eq!(b.max, [150.0, 250.0, 60.0]);
+    }
+
+    #[test]
+    fn test_level_for_resolution() {
+        let info = CopcInfo {
+            center: [0.0, 0.0, 0.0],
+            halfsize: 500.0,
+            spacing: 10.0,
+            root_hier_offset: 0,
+            root_hier_size: 0,
+            gpstime_minimum: 0.0,
+            gpstime_maximum: 0.0,
+        };
+
+        // spacing=10, resolution=10 → level 0 (no refinement needed)
+        assert_eq!(info.level_for_resolution(10.0), 0);
+        // spacing=10, resolution=5 → level 1 (one halving)
+        assert_eq!(info.level_for_resolution(5.0), 1);
+        // spacing=10, resolution=2.5 → level 2
+        assert_eq!(info.level_for_resolution(2.5), 2);
+        // spacing=10, resolution=1.0 → ceil(log2(10)) = 4
+        assert_eq!(info.level_for_resolution(1.0), 4);
+        // spacing=10, resolution=0.5 → ceil(log2(20)) = 5
+        assert_eq!(info.level_for_resolution(0.5), 5);
+        // resolution larger than spacing → level 0
+        assert_eq!(info.level_for_resolution(20.0), 0);
+        // edge case: zero/negative resolution → level 0
+        assert_eq!(info.level_for_resolution(0.0), 0);
+        assert_eq!(info.level_for_resolution(-1.0), 0);
     }
 }

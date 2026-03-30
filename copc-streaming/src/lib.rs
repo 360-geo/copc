@@ -59,6 +59,9 @@
 //! - [`load_hierarchy_for_bounds`](CopcStreamingReader::load_hierarchy_for_bounds) —
 //!   load only pages whose subtree intersects a bounding box. Call this when the
 //!   camera moves or a spatial query arrives.
+//! - [`load_hierarchy_for_bounds_to_level`](CopcStreamingReader::load_hierarchy_for_bounds_to_level) —
+//!   same, but stops at a maximum octree level. Use with
+//!   [`CopcInfo::level_for_resolution`] for LOD control.
 //! - [`load_pending_pages`](CopcStreamingReader::load_pending_pages) — fetch the
 //!   next batch of pending pages (all of them). Useful when you don't need spatial
 //!   filtering and just want to go one level deeper.
@@ -98,5 +101,5 @@ pub use error::CopcError;
 pub use file_source::FileSource;
 pub use header::{CopcHeader, CopcInfo};
 pub use hierarchy::{HierarchyCache, HierarchyEntry};
-pub use reader::CopcStreamingReader;
+pub use reader::{CopcStreamingReader, filter_points_by_bounds, filter_points_by_time};
 pub use types::{Aabb, VoxelKey};

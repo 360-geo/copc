@@ -150,6 +150,45 @@ impl HierarchyCache {
         Ok(())
     }
 
+    /// Like [`load_pages_for_bounds`](Self::load_pages_for_bounds) but stops
+    /// at `max_level` — pages whose key is deeper than `max_level` are left
+    /// pending even if they intersect the bounds.
+    pub async fn load_pages_for_bounds_to_level(
+        &mut self,
+        source: &impl ByteSource,
+        bounds: &Aabb,
+        root_bounds: &Aabb,
+        max_level: i32,
+    ) -> Result<(), CopcError> {
+        loop {
+            let matching: Vec<PendingPage> = self
+                .pending_pages
+                .iter()
+                .filter(|p| {
+                    p.key.level <= max_level && p.key.bounds(root_bounds).intersects(bounds)
+                })
+                .cloned()
+                .collect();
+
+            if matching.is_empty() {
+                break;
+            }
+
+            self.pending_pages.retain(|p| {
+                !(p.key.level <= max_level && p.key.bounds(root_bounds).intersects(bounds))
+            });
+
+            let ranges: Vec<_> = matching.iter().map(|p| (p.offset, p.size)).collect();
+            let results = source.read_ranges(&ranges).await?;
+
+            for (page, data) in matching.iter().zip(results) {
+                self.parse_page(&data, page.offset)?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Whether there are unloaded hierarchy pages.
     pub fn has_pending_pages(&self) -> bool {
         !self.pending_pages.is_empty()
@@ -369,6 +408,40 @@ mod tests {
                 })
                 .is_some()
         );
+        assert!(cache.pending_pages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_load_pages_for_bounds_to_level_stops_at_max_level() {
+        let (source, root_bounds) = build_two_child_source();
+
+        let mut cache = HierarchyCache::new();
+        cache.parse_page(&source[..96], 0).unwrap();
+
+        assert_eq!(cache.len(), 1); // root node
+        assert_eq!(cache.pending_pages.len(), 2); // level-1 page pointers
+
+        // Query the entire bounds but limit to level 0 — no pages should load
+        // because the pending pages are level-1 pointers.
+        let full_query = Aabb {
+            min: [0.0, 0.0, 0.0],
+            max: [100.0, 100.0, 100.0],
+        };
+        cache
+            .load_pages_for_bounds_to_level(&source, &full_query, &root_bounds, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(cache.len(), 1); // still just root
+        assert_eq!(cache.pending_pages.len(), 2); // both pages still pending
+
+        // Now allow level 1 — both pages should load
+        cache
+            .load_pages_for_bounds_to_level(&source, &full_query, &root_bounds, 1)
+            .await
+            .unwrap();
+
+        assert_eq!(cache.len(), 3); // root + two level-2 nodes
         assert!(cache.pending_pages.is_empty());
     }
 
