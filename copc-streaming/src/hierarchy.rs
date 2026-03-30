@@ -13,16 +13,20 @@ use crate::error::CopcError;
 use crate::header::CopcInfo;
 
 /// A single hierarchy entry: metadata for one octree node.
+///
+/// The `key` is duplicated from the hierarchy map for convenience when
+/// passing entries around without the map key.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct HierarchyEntry {
     /// The octree node this entry describes.
     pub key: VoxelKey,
     /// Absolute file offset to the compressed point data.
     pub offset: u64,
     /// Size of compressed data in bytes.
-    pub byte_size: i32,
-    /// Number of points, or -1 if this is a page pointer.
-    pub point_count: i32,
+    pub byte_size: u32,
+    /// Number of points in this node.
+    pub point_count: u32,
 }
 
 /// Reference to a hierarchy page that hasn't been loaded yet.
@@ -153,17 +157,18 @@ impl HierarchyCache {
                     offset,
                     size: byte_size as u64,
                 });
-            } else {
+            } else if point_count >= 0 && byte_size >= 0 {
                 self.entries.insert(
                     key,
                     HierarchyEntry {
                         key,
                         offset,
-                        byte_size,
-                        point_count,
+                        byte_size: byte_size as u32,
+                        point_count: point_count as u32,
                     },
                 );
             }
+            // Silently skip entries with invalid negative values (corrupt file).
         }
 
         Ok(())

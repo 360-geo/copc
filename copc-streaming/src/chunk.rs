@@ -10,6 +10,7 @@ use crate::hierarchy::HierarchyEntry;
 use crate::types::VoxelKey;
 
 /// A decompressed point data chunk.
+#[non_exhaustive]
 pub struct DecompressedChunk {
     /// The octree node this chunk belongs to.
     pub key: VoxelKey,
@@ -40,22 +41,49 @@ pub async fn fetch_and_decompress(
     Ok(DecompressedChunk {
         key: entry.key,
         data: decompressed,
-        point_count: entry.point_count as u32,
+        point_count: entry.point_count,
         point_record_length,
     })
 }
 
-/// Parse points from a decompressed chunk into `las::Point` values.
+/// Parse all points from a decompressed chunk into `las::Point` values.
 pub fn read_points(
     chunk: &DecompressedChunk,
     header: &las::Header,
 ) -> Result<Vec<las::Point>, CopcError> {
+    read_points_range(chunk, header, 0..chunk.point_count)
+}
+
+/// Parse a sub-range of points from a decompressed chunk.
+///
+/// Only the points in `range` are parsed — bytes outside the range are skipped.
+/// Returns an error if the range extends beyond the chunk's point count.
+pub fn read_points_range(
+    chunk: &DecompressedChunk,
+    header: &las::Header,
+    range: std::ops::Range<u32>,
+) -> Result<Vec<las::Point>, CopcError> {
+    if range.end > chunk.point_count {
+        return Err(CopcError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "point range {}..{} exceeds chunk point count {}",
+                range.start, range.end, chunk.point_count
+            ),
+        )));
+    }
+
     let format = header.point_format();
     let transforms = header.transforms();
-    let mut cursor = Cursor::new(chunk.data.as_slice());
-    let mut points = Vec::with_capacity(chunk.point_count as usize);
+    let record_len = chunk.point_record_length as u64;
 
-    for _ in 0..chunk.point_count {
+    let start = (range.start as u64 * record_len) as usize;
+    let count = range.end.saturating_sub(range.start) as usize;
+
+    let mut cursor = Cursor::new(&chunk.data[start..]);
+    let mut points = Vec::with_capacity(count);
+
+    for _ in 0..count {
         let raw = las::raw::Point::read_from(&mut cursor, format)?;
         points.push(las::Point::new(raw, transforms));
     }

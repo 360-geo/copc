@@ -26,36 +26,37 @@
 //!     None => return Ok(()), // no temporal index in this file
 //! };
 //!
-//! // Define the time window we care about.
 //! let start = GpsTime(1_000_000.0);
 //! let end   = GpsTime(1_000_010.0);
+//! let root_bounds = reader.copc_info().root_bounds();
 //!
-//! // Load only the temporal pages whose subtree overlaps our time range.
-//! // Pages covering other time periods are never fetched.
-//! temporal.load_pages_for_time_range(reader.source(), start, end).await?;
-//!
-//! // Find octree nodes that overlap the time window.
-//! let nodes = temporal.nodes_in_range(start, end);
-//!
-//! for entry in &nodes {
-//!     // Estimate the point sub-range within the node.
+//! // Query loads only the temporal pages that overlap the time range,
+//! // then returns matching nodes. Pages outside the range are never fetched.
+//! for entry in temporal.query(reader.source(), start, end).await? {
 //!     let hier = reader.get(&entry.key).unwrap();
+//!     if !entry.key.bounds(&root_bounds).intersects(&my_query_box) { continue; }
+//!
+//!     // Estimate which points fall in the time window, then read only those.
 //!     let range = entry.estimate_point_range(
-//!         start, end, temporal.stride(), hier.point_count as u32,
+//!         start, end, temporal.stride(), hier.point_count,
 //!     );
-//!     println!("{:?}: points {}..{}", entry.key, range.start, range.end);
+//!     let chunk = reader.fetch_chunk(&entry.key).await?;
+//!     let points = reader.read_points_range(&chunk, range)?;
 //! }
 //! ```
 //!
 //! # Incremental page loading
 //!
-//! Like the spatial hierarchy, the temporal index is organised in pages.
-//! [`TemporalCache::from_reader`] loads the header and root page. You can then:
+//! # How it works
 //!
-//! - call [`TemporalCache::load_pages_for_time_range`] to fetch only the pages
-//!   whose subtree time bounds overlap your query — skipping irrelevant subtrees
-//!   entirely, or
-//! - call [`TemporalCache::load_all_pages`] to fetch everything at once.
+//! [`TemporalCache::from_reader`] loads the header and root page.
+//! [`TemporalCache::query`] then loads only the pages whose subtree time bounds
+//! overlap the requested range and returns matching nodes — pages outside the
+//! range are never fetched.
+//!
+//! For advanced use cases you can call [`TemporalCache::load_pages_for_time_range`]
+//! and [`TemporalCache::nodes_in_range`] separately, or
+//! [`TemporalCache::load_all_pages`] to fetch the entire index at once.
 
 mod error;
 mod gps_time;

@@ -117,10 +117,7 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         let entry = self
             .hierarchy
             .get(key)
-            .ok_or(CopcError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "node not in hierarchy",
-            )))?;
+            .ok_or(CopcError::NodeNotFound(*key))?;
         let point_record_length = self.header.las_header.point_format().len()
             + self.header.las_header.point_format().extra_bytes;
         chunk::fetch_and_decompress(
@@ -132,8 +129,21 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         .await
     }
 
-    /// Parse points from a decompressed chunk.
+    /// Parse all points from a decompressed chunk.
     pub fn read_points(&self, chunk: &DecompressedChunk) -> Result<Vec<las::Point>, CopcError> {
         chunk::read_points(chunk, &self.header.las_header)
+    }
+
+    /// Parse a sub-range of points from a decompressed chunk.
+    ///
+    /// Only the points in `range` are parsed — bytes outside the range are skipped.
+    /// Pair with `NodeTemporalEntry::estimate_point_range` from the `copc-temporal`
+    /// crate to read only the points that fall within a time window.
+    pub fn read_points_range(
+        &self,
+        chunk: &DecompressedChunk,
+        range: std::ops::Range<u32>,
+    ) -> Result<Vec<las::Point>, CopcError> {
+        chunk::read_points_range(chunk, &self.header.las_header, range)
     }
 }

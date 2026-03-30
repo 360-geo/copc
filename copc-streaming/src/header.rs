@@ -53,6 +53,7 @@ impl CopcHeader {
 
 /// COPC info VLR payload (160 bytes). This is COPC-specific — not part of the LAS standard.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CopcInfo {
     /// Centre of the root octree cube `[x, y, z]`.
     pub center: [f64; 3],

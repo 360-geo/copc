@@ -1,4 +1,7 @@
 /// Octree node key: (level, x, y, z).
+///
+/// All fields are `i32` to match the COPC wire format. `level` is always
+/// non-negative in practice; `x`, `y`, `z` are signed per the spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VoxelKey {
     /// Octree depth (0 = root).
@@ -34,27 +37,19 @@ impl VoxelKey {
     }
 
     /// Return the child key in the given octant direction (0–7).
-    pub fn child(&self, dir: i32) -> VoxelKey {
+    pub fn child(&self, dir: u8) -> VoxelKey {
+        debug_assert!(dir < 8, "octant direction must be 0–7");
         VoxelKey {
             level: self.level + 1,
-            x: (self.x << 1) | (dir & 0x1),
-            y: (self.y << 1) | ((dir >> 1) & 0x1),
-            z: (self.z << 1) | ((dir >> 2) & 0x1),
+            x: (self.x << 1) | i32::from(dir & 0x1),
+            y: (self.y << 1) | i32::from((dir >> 1) & 0x1),
+            z: (self.z << 1) | i32::from((dir >> 2) & 0x1),
         }
     }
 
     /// Return all eight child keys.
     pub fn children(&self) -> [VoxelKey; 8] {
-        [
-            self.child(0),
-            self.child(1),
-            self.child(2),
-            self.child(3),
-            self.child(4),
-            self.child(5),
-            self.child(6),
-            self.child(7),
-        ]
+        std::array::from_fn(|i| self.child(i as u8))
     }
 
     /// Compute the spatial bounding box of this node given the root octree bounds.

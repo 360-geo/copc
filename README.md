@@ -57,7 +57,7 @@ while reader.has_pending_pages() {
 }
 
 for (key, entry) in reader.entries() {
-    if entry.point_count <= 0 { continue; }
+    if entry.point_count == 0 { continue; }
     if !key.bounds(&root_bounds).intersects(&query_box) { continue; }
 
     let chunk = reader.fetch_chunk(key).await?;
@@ -70,13 +70,22 @@ for (key, entry) in reader.entries() {
 ```rust
 use copc_temporal::{GpsTime, TemporalCache};
 
-// Load only temporal index pages that overlap the time range.
 if let Some(mut temporal) = TemporalCache::from_reader(&reader).await? {
     let start = GpsTime(1_000_000.0);
     let end   = GpsTime(1_000_010.0);
-    temporal.load_pages_for_time_range(reader.source(), start, end).await?;
 
-    let matching = temporal.nodes_in_range(start, end);
+    // Query loads only the index pages needed, then returns matching nodes.
+    for entry in temporal.query(reader.source(), start, end).await? {
+        let hier = reader.get(&entry.key).unwrap();
+        if !entry.key.bounds(&root_bounds).intersects(&query_box) { continue; }
+
+        // Read only the points that fall within the time window.
+        let range = entry.estimate_point_range(
+            start, end, temporal.stride(), hier.point_count,
+        );
+        let chunk = reader.fetch_chunk(&entry.key).await?;
+        let points = reader.read_points_range(&chunk, range)?;
+    }
 }
 ```
 

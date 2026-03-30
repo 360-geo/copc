@@ -20,7 +20,15 @@ pub struct NodeTemporalEntry {
 
 impl NodeTemporalEntry {
     /// Create a new entry with the given key and samples.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `samples` is empty — every node must have at least one sample.
     pub fn new(key: VoxelKey, samples: Vec<GpsTime>) -> Self {
+        assert!(
+            !samples.is_empty(),
+            "NodeTemporalEntry requires at least one sample"
+        );
         Self { key, samples }
     }
 
@@ -38,7 +46,7 @@ impl NodeTemporalEntry {
     pub fn overlaps(&self, start: GpsTime, end: GpsTime) -> bool {
         let (min, max) = self.time_range();
         // Node overlaps if its max >= start AND its min <= end
-        max.0 >= start.0 && min.0 <= end.0
+        max >= start && min <= end
     }
 
     /// Estimate the point index range within the decompressed chunk for a time range.
@@ -55,16 +63,16 @@ impl NodeTemporalEntry {
         stride: u32,
         point_count: u32,
     ) -> Range<u32> {
-        if point_count == 0 || self.samples.is_empty() {
+        if point_count == 0 {
             return 0..0;
         }
 
         // First index i where samples[i] >= start
-        let i = self.samples.partition_point(|s| s.0 < start.0);
+        let i = self.samples.partition_point(|s| *s < start);
 
         // Last index j where samples[j] <= end
         // partition_point finds first index where samples[j] > end, subtract 1
-        let past_end = self.samples.partition_point(|s| s.0 <= end.0);
+        let past_end = self.samples.partition_point(|s| *s <= end);
 
         if i >= past_end {
             // No samples in range
@@ -455,21 +463,6 @@ mod tests {
 
         // Query entirely after
         let range = entry.estimate_point_range(GpsTime(400.0), GpsTime(500.0), 10, 30);
-        assert_eq!(range, 0..0);
-    }
-
-    #[test]
-    fn test_estimate_point_range_empty() {
-        let entry = NodeTemporalEntry {
-            key: VoxelKey {
-                level: 0,
-                x: 0,
-                y: 0,
-                z: 0,
-            },
-            samples: vec![],
-        };
-        let range = entry.estimate_point_range(GpsTime(0.0), GpsTime(100.0), 10, 0);
         assert_eq!(range, 0..0);
     }
 

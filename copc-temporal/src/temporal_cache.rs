@@ -179,6 +179,21 @@ impl TemporalCache {
         Ok(())
     }
 
+    /// Load relevant pages and return all nodes that overlap a time range.
+    ///
+    /// This is the primary query method — it ensures the right pages are loaded
+    /// before returning results. Equivalent to calling `load_pages_for_time_range`
+    /// followed by `nodes_in_range`, but cannot return incomplete results.
+    pub async fn query(
+        &mut self,
+        source: &impl ByteSource,
+        start: GpsTime,
+        end: GpsTime,
+    ) -> Result<Vec<&NodeTemporalEntry>, TemporalError> {
+        self.load_pages_for_time_range(source, start, end).await?;
+        Ok(self.nodes_in_range(start, end))
+    }
+
     /// Look up the temporal entry for a node.
     pub fn get(&self, key: &VoxelKey) -> Option<&NodeTemporalEntry> {
         self.entries.get(key)

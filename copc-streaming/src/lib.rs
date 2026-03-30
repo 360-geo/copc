@@ -24,7 +24,7 @@
 //!
 //! // Walk the octree — check which nodes intersect your region.
 //! for (key, entry) in reader.entries() {
-//!     if entry.point_count <= 0 { continue; }
+//!     if entry.point_count == 0 { continue; }
 //!     if !key.bounds(&root_bounds).intersects(&my_query_box) { continue; }
 //!
 //!     // Drill into finer nodes when available.

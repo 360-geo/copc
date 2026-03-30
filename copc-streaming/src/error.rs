@@ -30,6 +30,10 @@ pub enum CopcError {
         offset: u64,
     },
 
+    /// The requested node is not in the loaded hierarchy.
+    #[error("node not found in hierarchy: {0:?}")]
+    NodeNotFound(crate::types::VoxelKey),
+
     /// Custom error from a [`ByteSource`](crate::ByteSource) implementation.
     #[error("byte source error: {0}")]
     ByteSource(Box<dyn std::error::Error + Send + Sync>),
