@@ -149,19 +149,26 @@ impl<S: ByteSource> CopcStreamingReader<S> {
 
     /// Fetch and decompress a single point chunk.
     pub async fn fetch_chunk(&self, key: &VoxelKey) -> Result<DecompressedChunk, CopcError> {
+        self.fetch_chunk_with_source(&self.source, key).await
+    }
+
+    /// Fetch and decompress a point chunk using an external byte source.
+    ///
+    /// This is useful when the reader is behind a lock and you want to
+    /// extract the metadata under the lock, then do the async fetch
+    /// without holding it.
+    pub async fn fetch_chunk_with_source(
+        &self,
+        source: &impl ByteSource,
+        key: &VoxelKey,
+    ) -> Result<DecompressedChunk, CopcError> {
         let entry = self
             .hierarchy
             .get(key)
             .ok_or(CopcError::NodeNotFound(*key))?;
         let point_record_length = self.header.las_header.point_format().len()
             + self.header.las_header.point_format().extra_bytes;
-        chunk::fetch_and_decompress(
-            &self.source,
-            entry,
-            &self.header.laz_vlr,
-            point_record_length,
-        )
-        .await
+        chunk::fetch_and_decompress(source, entry, &self.header.laz_vlr, point_record_length).await
     }
 
     /// Parse all points from a decompressed chunk.

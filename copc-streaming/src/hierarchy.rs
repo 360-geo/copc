@@ -98,6 +98,10 @@ impl HierarchyCache {
     }
 
     /// Load all pending pages (breadth-first).
+    ///
+    /// Each depth level is fetched in a single [`ByteSource::read_ranges`]
+    /// call, so HTTP backends that override `read_ranges` with parallel
+    /// fetches will issue one round-trip per depth level.
     pub async fn load_all(
         &mut self,
         source: &impl ByteSource,

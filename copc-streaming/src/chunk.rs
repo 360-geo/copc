@@ -3,6 +3,7 @@
 use std::io::Cursor;
 
 use laz::LazVlr;
+use laz::record::{LayeredPointRecordDecompressor, RecordDecompressor};
 
 use crate::byte_source::ByteSource;
 use crate::error::CopcError;
@@ -36,7 +37,7 @@ pub async fn fetch_and_decompress(
     let decompressed_size = entry.point_count as usize * point_record_length as usize;
     let mut decompressed = vec![0u8; decompressed_size];
 
-    laz::decompress_buffer(&compressed, &mut decompressed, laz_vlr.clone())?;
+    decompress_copc_chunk(&compressed, &mut decompressed, laz_vlr)?;
 
     Ok(DecompressedChunk {
         key: entry.key,
@@ -44,6 +45,24 @@ pub async fn fetch_and_decompress(
         point_count: entry.point_count,
         point_record_length,
     })
+}
+
+/// Decompress a single COPC chunk.
+///
+/// COPC chunks are independently compressed and do NOT start with the 8-byte
+/// chunk table offset that standard LAZ files have. We use
+/// `LayeredPointRecordDecompressor` directly (the same approach as copc-rs)
+/// to bypass `LasZipDecompressor`'s chunk table handling.
+fn decompress_copc_chunk(
+    compressed: &[u8],
+    decompressed: &mut [u8],
+    laz_vlr: &LazVlr,
+) -> Result<(), CopcError> {
+    let src = Cursor::new(compressed);
+    let mut decompressor = LayeredPointRecordDecompressor::new(src);
+    decompressor.set_fields_from(laz_vlr.items())?;
+    decompressor.decompress_many(decompressed)?;
+    Ok(())
 }
 
 /// Parse all points from a decompressed chunk into `las::Point` values.

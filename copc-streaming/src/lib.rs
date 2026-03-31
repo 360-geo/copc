@@ -101,7 +101,7 @@ mod reader;
 mod types;
 
 pub use byte_source::ByteSource;
-pub use chunk::DecompressedChunk;
+pub use chunk::{DecompressedChunk, fetch_and_decompress};
 pub use error::CopcError;
 pub use file_source::FileSource;
 pub use header::{CopcHeader, CopcInfo};
