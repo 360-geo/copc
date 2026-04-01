@@ -10,6 +10,7 @@ jobs:
 
     permissions:
       contents: read
+      id-token: write
 
     steps:
       - name: Checkout the code
@@ -29,10 +30,13 @@ jobs:
           # Update path dependency to include version for crates.io
           sed -i "s|copc-streaming = { path = \"../copc-streaming\" }|copc-streaming = { path = \"../copc-streaming\", version = \"${VERSION}\" }|" copc-temporal/Cargo.toml
 
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
       - name: Publish copc-streaming
         run: cargo publish -p copc-streaming --allow-dirty
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
       - name: Wait for crates.io index
         run: sleep 30
@@ -40,4 +44,4 @@ jobs:
       - name: Publish copc-temporal
         run: cargo publish -p copc-temporal --allow-dirty
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
