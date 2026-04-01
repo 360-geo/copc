@@ -76,7 +76,7 @@ The header is always at byte offset 0 within the EVLR data payload.
 | 20 | uint32 | root_page_size | Size of the root page in bytes. |
 | 24 | uint32 | reserved | MUST be `0`. Readers SHOULD ignore this field. |
 
-Note: `root_page_offset` is an **absolute file offset**, not relative to the EVLR data start. This allows clients to seek directly to the root page without parsing intermediate data. This matches the convention used by the COPC spatial hierarchy (`root_hier_offset`). In practice the root page will typically immediately follow the header at offset `evlr_data_start + 32`, but writers MAY place it elsewhere.
+Note: `root_page_offset` is an **absolute file offset**, not relative to the EVLR data start. This matches the convention used by the COPC spatial hierarchy (`root_hier_offset`). In practice the root page immediately follows the header at offset `evlr_data_start + 32`.
 
 ### 6.2 Page Structure
 
@@ -122,6 +122,8 @@ The VoxelKey in a page pointer identifies the subtree root node. The child page 
 The root page MUST contain entries (node entries or page pointers) for all octree nodes at levels 0 through some writer-chosen depth. Writers SHOULD aim to keep the root page small enough to load in a single read operation (recommended: under 16 KB).
 
 A practical strategy: the root page contains node entries for levels 0-3 (typically dozens of nodes) and page pointers for each level-3 subtree that has deeper descendants. Each child page contains node entries for its subtree. Writers MAY nest pages deeper (page pointers within child pages) for very large files.
+
+All pages MUST reside entirely within the EVLR data payload. That is, for every page (including the root page), its byte range `[offset, offset + size)` MUST fall within `[evlr_data_start, evlr_data_start + data_length)` where `evlr_data_start` and `data_length` are the EVLR's data offset and declared length respectively. This guarantees that a client can load the entire temporal index with a single read of the EVLR data if it chooses to do so.
 
 Pages MUST NOT overlap: every node with `point_count > 0` in the hierarchy MUST appear as a node entry in exactly one page. Page pointers do not count as node entries for this requirement.
 
