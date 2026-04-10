@@ -1,6 +1,6 @@
 [package]
 name = "copc-temporal"
-version = "0.0.0-dev"
+version = "0.2.0-dev"
 edition = "2024"
 description = "COPC Temporal Index Extension reader for time-range filtering of point clouds"
 license = "MIT"
@@ -11,7 +11,7 @@ readme = "../README.md"
 
 [dependencies]
 copc-streaming = { path = "../copc-streaming" }
-las = { version = "0.9", features = ["laz"] }
+las = { git = "https://github.com/jacovdbergh/las-rs", rev = "833cf7ae0d8e98edf41bca358dedb68297e23215", features = ["laz"] }
 byteorder = "1"
 thiserror = "2"
 [dev-dependencies]

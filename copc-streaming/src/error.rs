@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::fields::Fields;
+
 /// Errors that can occur when reading a COPC file.
 #[derive(Debug, Error)]
 pub enum CopcError {
@@ -33,6 +35,16 @@ pub enum CopcError {
     /// The requested node is not in the loaded hierarchy.
     #[error("node not found in hierarchy: {0:?}")]
     NodeNotFound(crate::types::VoxelKey),
+
+    /// Attempted to materialize `las::Point` values from a chunk that was
+    /// decoded with a partial field mask.
+    ///
+    /// A partially-decoded chunk leaves skipped field bytes as zeros in the
+    /// backing buffer, so producing `Point` values from it would silently
+    /// yield wrong data for those fields. Refetch the chunk with `Fields::ALL`
+    /// or use the column-level accessors on [`Chunk`](crate::Chunk) instead.
+    #[error("cannot materialize points from partially-decoded chunk (fields: {0:?})")]
+    PartialDecode(Fields),
 
     /// Custom error from a [`ByteSource`](crate::ByteSource) implementation.
     #[error("byte source error: {0}")]

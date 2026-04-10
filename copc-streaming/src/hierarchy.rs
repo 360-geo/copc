@@ -264,6 +264,7 @@ mod tests {
     use super::*;
     use byteorder::WriteBytesExt;
 
+    #[allow(clippy::too_many_arguments)]
     fn write_hierarchy_entry(
         buf: &mut Vec<u8>,
         level: i32,

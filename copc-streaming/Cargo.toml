@@ -1,6 +1,6 @@
 [package]
 name = "copc-streaming"
-version = "0.0.0-dev"
+version = "0.2.0-dev"
 edition = "2024"
 description = "Async streaming COPC (Cloud-Optimized Point Cloud) reader"
 license = "MIT"
@@ -12,7 +12,8 @@ readme = "../README.md"
 [dependencies]
 byteorder = "1"
 thiserror = "2"
-las = { version = "0.9", features = ["laz"] }
+bitflags = "2"
+las = { git = "https://github.com/jacovdbergh/las-rs", rev = "833cf7ae0d8e98edf41bca358dedb68297e23215", features = ["laz"] }
 laz = "0.12"
 
 [dev-dependencies]

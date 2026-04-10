@@ -1,8 +1,9 @@
 //! High-level streaming COPC reader.
 
 use crate::byte_source::ByteSource;
-use crate::chunk::{self, DecompressedChunk};
+use crate::chunk::{self, Chunk};
 use crate::error::CopcError;
+use crate::fields::Fields;
 use crate::header::{self, CopcHeader, CopcInfo};
 use crate::hierarchy::{HierarchyCache, HierarchyEntry};
 use crate::types::VoxelKey;
@@ -145,11 +146,23 @@ impl<S: ByteSource> CopcStreamingReader<S> {
             .await
     }
 
-    // --- Point data ---
+    // ==================== Fast API (tier 2) ====================
+    //
+    // Returns `Chunk`s with zero-copy column access. Caller picks which
+    // fields to decode, walks columns directly, and decides when to
+    // materialize `las::Point` values (if ever).
 
-    /// Fetch and decompress a single point chunk.
-    pub async fn fetch_chunk(&self, key: &VoxelKey) -> Result<DecompressedChunk, CopcError> {
-        self.fetch_chunk_with_source(&self.source, key).await
+    /// Fetch and decompress a single chunk, decoding only the fields in
+    /// `fields`.
+    ///
+    /// On LAS 1.4 layered formats (6/7/8 — the formats COPC mandates) this
+    /// is a real CPU saving proportional to the number of skipped layers.
+    /// Fields listed in [`Fields`] map directly to LAZ layer-level
+    /// `DecompressionSelection` and the omitted layers are not arithmetically
+    /// decoded at all.
+    pub async fn fetch_chunk(&self, key: &VoxelKey, fields: Fields) -> Result<Chunk, CopcError> {
+        self.fetch_chunk_with_source(&self.source, key, fields)
+            .await
     }
 
     /// Fetch and decompress a point chunk using an external byte source.
@@ -161,91 +174,131 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         &self,
         source: &impl ByteSource,
         key: &VoxelKey,
-    ) -> Result<DecompressedChunk, CopcError> {
+        fields: Fields,
+    ) -> Result<Chunk, CopcError> {
         let entry = self
             .hierarchy
             .get(key)
             .ok_or(CopcError::NodeNotFound(*key))?;
-        let point_record_length = self.header.las_header.point_format().len()
-            + self.header.las_header.point_format().extra_bytes;
-        chunk::fetch_and_decompress(source, entry, &self.header.laz_vlr, point_record_length).await
+        chunk::fetch_and_decompress(
+            source,
+            entry,
+            &self.header.laz_vlr,
+            &self.header.las_header,
+            fields,
+        )
+        .await
     }
 
-    /// Parse all points from a decompressed chunk.
-    pub fn read_points(&self, chunk: &DecompressedChunk) -> Result<Vec<las::Point>, CopcError> {
-        chunk::read_points(chunk, &self.header.las_header)
-    }
-
-    /// Parse a sub-range of points from a decompressed chunk.
+    /// Keys in the currently-loaded hierarchy whose subtree intersects
+    /// `bounds` and whose level is at most `max_level` (if provided).
     ///
-    /// Only the points in `range` are parsed — bytes outside the range are skipped.
-    /// Pair with `NodeTemporalEntry::estimate_point_range` from the `copc-temporal`
-    /// crate to read only the points that fall within a time window.
-    pub fn read_points_range(
-        &self,
-        chunk: &DecompressedChunk,
-        range: std::ops::Range<u32>,
-    ) -> Result<Vec<las::Point>, CopcError> {
-        chunk::read_points_range(chunk, &self.header.las_header, range)
-    }
-
-    /// Parse all points from a chunk, keeping only those inside `bounds`.
-    pub fn read_points_in_bounds(
-        &self,
-        chunk: &DecompressedChunk,
-        bounds: &crate::types::Aabb,
-    ) -> Result<Vec<las::Point>, CopcError> {
-        let points = chunk::read_points(chunk, &self.header.las_header)?;
-        Ok(filter_points_by_bounds(points, bounds))
-    }
-
-    /// Parse a sub-range of points, keeping only those inside `bounds`.
-    ///
-    /// Combines temporal range estimation with spatial filtering: first only
-    /// the points in `range` are decompressed, then points outside `bounds`
-    /// are discarded.
-    pub fn read_points_range_in_bounds(
-        &self,
-        chunk: &DecompressedChunk,
-        range: std::ops::Range<u32>,
-        bounds: &crate::types::Aabb,
-    ) -> Result<Vec<las::Point>, CopcError> {
-        let points = chunk::read_points_range(chunk, &self.header.las_header, range)?;
-        Ok(filter_points_by_bounds(points, bounds))
-    }
-
-    // --- High-level queries ---
-
-    /// Load hierarchy and return all points inside `bounds`.
-    ///
-    /// This is the simplest way to query a spatial region. It loads the
-    /// hierarchy pages that overlap `bounds`, fetches and decompresses
-    /// matching chunks, and returns only the points inside the bounding box.
+    /// Use this to drive your own fetch loop — for parallelism, cancellation,
+    /// prioritization, or streaming:
     ///
     /// ```rust,ignore
-    /// let points = reader.query_points(&my_query_box).await?;
+    /// reader.load_hierarchy_for_bounds_to_level(&bbox, lod).await?;
+    /// for key in reader.visible_keys(&bbox, Some(lod)) {
+    ///     let chunk = reader.fetch_chunk(&key, Fields::Z | Fields::RGB).await?;
+    ///     // ...
+    /// }
     /// ```
+    pub fn visible_keys(
+        &self,
+        bounds: &crate::types::Aabb,
+        max_level: Option<i32>,
+    ) -> Vec<VoxelKey> {
+        let root_bounds = self.header.copc_info.root_bounds();
+        self.hierarchy
+            .iter()
+            .filter(|(k, e)| {
+                e.point_count > 0
+                    && max_level.is_none_or(|lvl| k.level <= lvl)
+                    && k.bounds(&root_bounds).intersects(bounds)
+            })
+            .map(|(k, _)| *k)
+            .collect()
+    }
+
+    /// Load hierarchy for `bounds`, fetch every intersecting chunk, and
+    /// return them.
+    ///
+    /// Convenience wrapper over [`load_hierarchy_for_bounds`](Self::load_hierarchy_for_bounds),
+    /// [`visible_keys`](Self::visible_keys), and [`fetch_chunk`](Self::fetch_chunk)
+    /// in a sequential loop. For parallel fetches, cancellation, or
+    /// prioritization, use those building blocks directly.
+    pub async fn query_chunks(
+        &mut self,
+        bounds: &crate::types::Aabb,
+        fields: Fields,
+    ) -> Result<Vec<Chunk>, CopcError> {
+        self.load_hierarchy_for_bounds(bounds).await?;
+        let keys = self.visible_keys(bounds, None);
+        let mut chunks = Vec::with_capacity(keys.len());
+        for key in keys {
+            chunks.push(self.fetch_chunk(&key, fields).await?);
+        }
+        Ok(chunks)
+    }
+
+    /// Same as [`query_chunks`](Self::query_chunks) but limits the octree
+    /// depth to `max_level`.
+    pub async fn query_chunks_to_level(
+        &mut self,
+        bounds: &crate::types::Aabb,
+        max_level: i32,
+        fields: Fields,
+    ) -> Result<Vec<Chunk>, CopcError> {
+        self.load_hierarchy_for_bounds_to_level(bounds, max_level)
+            .await?;
+        let keys = self.visible_keys(bounds, Some(max_level));
+        let mut chunks = Vec::with_capacity(keys.len());
+        for key in keys {
+            chunks.push(self.fetch_chunk(&key, fields).await?);
+        }
+        Ok(chunks)
+    }
+
+    // ==================== Simple API (tier 1) ====================
+    //
+    // One-line entry points for scripts, tests, and prototypes. Always
+    // decodes every field and materializes `las::Point` values. Thin
+    // wrappers over the fast API — no duplicate read paths.
+
+    /// Fetch, decompress, and materialize every point in one chunk as
+    /// owned [`las::Point`] values.
+    ///
+    /// Equivalent to `fetch_chunk(key, Fields::ALL).await?.to_points()?`.
+    /// Prefer [`fetch_chunk`](Self::fetch_chunk) for performance-sensitive
+    /// code paths.
+    pub async fn fetch_points(&self, key: &VoxelKey) -> Result<Vec<las::Point>, CopcError> {
+        self.fetch_chunk(key, Fields::ALL).await?.to_points()
+    }
+
+    /// Load hierarchy for `bounds`, fetch all intersecting chunks, and
+    /// return the points inside `bounds`.
+    ///
+    /// Thin wrapper over [`query_chunks`](Self::query_chunks) with
+    /// `Fields::ALL`. Decodes everything and materializes; prefer
+    /// `query_chunks` when you only need a subset of fields or want to
+    /// walk points column-by-column.
     pub async fn query_points(
         &mut self,
         bounds: &crate::types::Aabb,
     ) -> Result<Vec<las::Point>, CopcError> {
-        self.load_hierarchy_for_bounds(bounds).await?;
-        let root_bounds = self.header.copc_info.root_bounds();
-
-        let keys: Vec<VoxelKey> = self
-            .hierarchy
-            .iter()
-            .filter(|(k, e)| e.point_count > 0 && k.bounds(&root_bounds).intersects(bounds))
-            .map(|(k, _)| *k)
-            .collect();
-
-        let mut all_points = Vec::new();
-        for key in keys {
-            let chunk = self.fetch_chunk(&key).await?;
-            let points = self.read_points_in_bounds(&chunk, bounds)?;
-            all_points.extend(points);
+        let chunks = self.query_chunks(bounds, Fields::ALL).await?;
+        let mut out = Vec::new();
+        for chunk in &chunks {
+            // `indices_in_bounds` on an `ALL`-decoded chunk always returns Some.
+            let indices = chunk
+                .indices_in_bounds(bounds)
+                .expect("Fields::ALL includes Fields::Z");
+            if indices.is_empty() {
+                continue;
+            }
+            out.extend(chunk.points_at(&indices)?);
         }
-        Ok(all_points)
+        Ok(out)
     }
 
     /// Load hierarchy to `max_level` and return all points inside `bounds`.
@@ -262,45 +315,19 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         bounds: &crate::types::Aabb,
         max_level: i32,
     ) -> Result<Vec<las::Point>, CopcError> {
-        self.load_hierarchy_for_bounds_to_level(bounds, max_level)
+        let chunks = self
+            .query_chunks_to_level(bounds, max_level, Fields::ALL)
             .await?;
-        let root_bounds = self.header.copc_info.root_bounds();
-
-        let keys: Vec<VoxelKey> = self
-            .hierarchy
-            .iter()
-            .filter(|(k, e)| {
-                e.point_count > 0
-                    && k.level <= max_level
-                    && k.bounds(&root_bounds).intersects(bounds)
-            })
-            .map(|(k, _)| *k)
-            .collect();
-
-        let mut all_points = Vec::new();
-        for key in keys {
-            let chunk = self.fetch_chunk(&key).await?;
-            let points = self.read_points_in_bounds(&chunk, bounds)?;
-            all_points.extend(points);
+        let mut out = Vec::new();
+        for chunk in &chunks {
+            let indices = chunk
+                .indices_in_bounds(bounds)
+                .expect("Fields::ALL includes Fields::Z");
+            if indices.is_empty() {
+                continue;
+            }
+            out.extend(chunk.points_at(&indices)?);
         }
-        Ok(all_points)
+        Ok(out)
     }
-}
-
-/// Filter points to only those inside an axis-aligned bounding box.
-pub fn filter_points_by_bounds(
-    points: Vec<las::Point>,
-    bounds: &crate::types::Aabb,
-) -> Vec<las::Point> {
-    points
-        .into_iter()
-        .filter(|p| {
-            p.x >= bounds.min[0]
-                && p.x <= bounds.max[0]
-                && p.y >= bounds.min[1]
-                && p.y <= bounds.max[1]
-                && p.z >= bounds.min[2]
-                && p.z <= bounds.max[2]
-        })
-        .collect()
 }
