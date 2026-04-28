@@ -18,6 +18,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "bitflags"
+version = "2.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843867be96c8daad0d758b57df9392b6d8d271134fce549de6ce169ff98a92af"
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -60,8 +66,9 @@ dependencies = [
 
 [[package]]
 name = "copc-streaming"
-version = "0.0.0-dev"
+version = "0.2.0-dev"
 dependencies = [
+ "bitflags",
  "byteorder",
  "las",
  "laz",
@@ -71,7 +78,7 @@ dependencies = [
 
 [[package]]
 name = "copc-temporal"
-version = "0.0.0-dev"
+version = "0.2.0-dev"
 dependencies = [
  "byteorder",
  "copc-streaming",
@@ -128,9 +135,8 @@ dependencies = [
 
 [[package]]
 name = "las"
-version = "0.9.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "501d35a98a0bf1e7d30cd61899741af22f853110021be78175926cc870a39dfd"
+version = "0.9.11"
+source = "git+https://github.com/jacovdbergh/las-rs?rev=833cf7ae0d8e98edf41bca358dedb68297e23215#833cf7ae0d8e98edf41bca358dedb68297e23215"
 dependencies = [
  "byteorder",
  "chrono",

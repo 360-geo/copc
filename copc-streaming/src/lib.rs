@@ -16,7 +16,7 @@
 //!
 //! // One call: loads hierarchy, fetches chunks, filters points by bounds.
 //! let points = reader.query_points(&my_query_box).await?;
-//! // each `point` has .x, .y, .z, .gps_time, .color, etc.
+//! // each `las::Point` has .x, .y, .z, .gps_time, .color, etc.
 //! ```
 //!
 //! # With LOD control
@@ -27,24 +27,46 @@
 //! let points = reader.query_points_to_level(&my_query_box, level).await?;
 //! ```
 //!
-//! # Low-level access
+//! # Fast path: select only the fields you need
 //!
-//! For full control over hierarchy loading and chunk processing:
+//! The [`query_points`](CopcStreamingReader::query_points) family decodes
+//! every field and materializes `las::Point` values. For hot paths,
+//! [`query_chunks`](CopcStreamingReader::query_chunks) returns [`Chunk`]s
+//! with zero-copy column access and lets you pick which LAZ layers to
+//! decode at all. Omitted layers skip arithmetic decoding entirely.
 //!
 //! ```rust,ignore
-//! let mut reader = CopcStreamingReader::open(
-//!     FileSource::open("points.copc.laz")?,
-//! ).await?;
+//! use copc_streaming::{CopcStreamingReader, FileSource, Fields};
 //!
-//! let root_bounds = reader.copc_info().root_bounds();
-//! reader.load_hierarchy_for_bounds(&my_query_box).await?;
+//! let level = reader.copc_info().level_for_resolution(0.5);
+//! let chunks = reader
+//!     .query_chunks_to_level(&my_query_box, level, Fields::Z | Fields::RGB)
+//!     .await?;
 //!
-//! for (key, entry) in reader.entries() {
-//!     if entry.point_count == 0 { continue; }
-//!     if !key.bounds(&root_bounds).intersects(&my_query_box) { continue; }
+//! for chunk in &chunks {
+//!     // `unwrap` is safe — we asked for Z and RGB so the chunk has them.
+//!     let indices = chunk.indices_in_bounds(&my_query_box).unwrap();
+//!     let rgb = chunk.rgb().unwrap();
+//!     let positions = chunk.positions().unwrap();
+//!     for (pos, rgb) in positions.zip(rgb) {
+//!         // ...
+//!     }
+//! }
+//! ```
 //!
-//!     let chunk = reader.fetch_chunk(key).await?;
-//!     let points = reader.read_points_in_bounds(&chunk, &my_query_box)?;
+//! # Low-level access
+//!
+//! For full control over hierarchy loading and fetch parallelism, combine
+//! [`load_hierarchy_for_bounds_to_level`](CopcStreamingReader::load_hierarchy_for_bounds_to_level),
+//! [`visible_keys`](CopcStreamingReader::visible_keys), and
+//! [`fetch_chunk`](CopcStreamingReader::fetch_chunk):
+//!
+//! ```rust,ignore
+//! reader.load_hierarchy_for_bounds_to_level(&my_query_box, level).await?;
+//! for key in reader.visible_keys(&my_query_box, Some(level)) {
+//!     let chunk = reader.fetch_chunk(&key, Fields::Z | Fields::GPS_TIME).await?;
+//!     let times = chunk.gps_time().unwrap();
+//!     // ... drive your own parallelism / cancellation / prioritization
 //! }
 //! ```
 //!
@@ -94,6 +116,7 @@
 mod byte_source;
 mod chunk;
 mod error;
+mod fields;
 mod file_source;
 mod header;
 mod hierarchy;
@@ -101,13 +124,16 @@ mod reader;
 mod types;
 
 pub use byte_source::ByteSource;
-pub use chunk::{DecompressedChunk, fetch_and_decompress};
+pub use chunk::Chunk;
 pub use error::CopcError;
+pub use fields::Fields;
 pub use file_source::FileSource;
 pub use header::{CopcHeader, CopcInfo};
 pub use hierarchy::{HierarchyCache, HierarchyEntry};
-pub use reader::{CopcStreamingReader, filter_points_by_bounds};
+pub use reader::CopcStreamingReader;
 pub use types::{Aabb, VoxelKey};
 
-/// Re-export `las::Point` — the point type returned by all read methods.
-pub use las::Point;
+// Re-exports of the handful of `las` types that appear in this crate's
+// public API. Users who only consume the types we return don't need to
+// add `las` as a direct dependency.
+pub use las::{Point, PointCloud, PointRef};

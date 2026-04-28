@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use copc_streaming::{ByteSource, CopcStreamingReader, VoxelKey};
+use copc_streaming::{ByteSource, Chunk, CopcStreamingReader, Fields, VoxelKey};
 
 use crate::TemporalError;
 use crate::gps_time::GpsTime;
@@ -232,40 +232,72 @@ impl TemporalCache {
         self.entries.iter()
     }
 
-    // --- High-level queries ---
+    // ==================== Fast API ====================
+    //
+    // Column-oriented queries that return `Chunk`s with a caller-chosen
+    // `Fields` mask, alongside an estimated candidate index range derived
+    // from the temporal index stride samples. Callers walk columns
+    // directly and decide for themselves whether to materialize
+    // `las::Point` values.
 
-    /// Query points by time range and spatial bounds.
+    /// Query chunks by time range and spatial bounds.
     ///
-    /// Loads the relevant hierarchy and temporal pages, fetches matching
-    /// chunks, and returns only the points that fall inside both the time
-    /// window and the bounding box.
+    /// Loads the relevant hierarchy and temporal pages, fetches every
+    /// matching chunk with the caller's `fields` mask, and returns
+    /// `(chunk, candidate_range)` pairs. `candidate_range` is the
+    /// sub-range of point indices in `chunk` whose GPS times could
+    /// possibly fall within `[start, end]` based on the temporal index
+    /// stride samples — points outside this range are guaranteed not to
+    /// match and can be skipped.
+    ///
+    /// The caller is responsible for the exact per-point intersection.
+    /// Combine with [`Chunk::indices_in_bounds`] and
+    /// [`indices_in_time_range`](crate::indices_in_time_range) to compute
+    /// the precise matching set, then walk column accessors or call
+    /// [`Chunk::points_at`] to materialize owned values.
     ///
     /// ```rust,ignore
-    /// let points = temporal.query_points(
-    ///     &mut reader, &query_box, start, end,
-    /// ).await?;
+    /// use copc_streaming::Fields;
+    ///
+    /// let chunks = temporal
+    ///     .query_chunks(
+    ///         &mut reader,
+    ///         &bbox,
+    ///         start,
+    ///         end,
+    ///         Fields::Z | Fields::GPS_TIME,
+    ///     )
+    ///     .await?;
+    ///
+    /// for (chunk, range) in &chunks {
+    ///     let times = chunk.gps_time().unwrap();
+    ///     for (i, t) in times.enumerate().skip(range.start as usize)
+    ///                                    .take(range.len()) {
+    ///         if t >= start.0 && t <= end.0 {
+    ///             // ...
+    ///         }
+    ///     }
+    /// }
     /// ```
-    pub async fn query_points<S: ByteSource>(
+    pub async fn query_chunks<S: ByteSource>(
         &mut self,
         reader: &mut CopcStreamingReader<S>,
         bounds: &copc_streaming::Aabb,
         start: GpsTime,
         end: GpsTime,
-    ) -> Result<Vec<las::Point>, TemporalError> {
-        // Load spatial hierarchy for the region.
+        fields: Fields,
+    ) -> Result<Vec<(Chunk, std::ops::Range<u32>)>, TemporalError> {
         reader
             .load_hierarchy_for_bounds(bounds)
             .await
             .map_err(TemporalError::Copc)?;
 
-        // Load temporal pages that overlap the time range.
         self.load_pages_for_time_range(reader.source(), start, end)
             .await?;
 
         let root_bounds = reader.copc_info().root_bounds();
         let stride = self.stride;
 
-        // Collect matching (key, point_range) pairs.
         let matches: Vec<_> = self
             .nodes_in_range(start, end)
             .into_iter()
@@ -280,31 +312,32 @@ impl TemporalCache {
             })
             .collect();
 
-        let mut all_points = Vec::new();
-        for (key, range) in matches {
-            let chunk = reader
-                .fetch_chunk(&key)
-                .await
-                .map_err(TemporalError::Copc)?;
-            let points = reader
-                .read_points_range_in_bounds(&chunk, range, bounds)
-                .map_err(TemporalError::Copc)?;
-            let points = crate::filter_points_by_time(points, start, end);
-            all_points.extend(points);
-        }
-        Ok(all_points)
+        let keys: Vec<copc_streaming::VoxelKey> =
+            matches.iter().map(|(k, _)| *k).collect();
+        let chunks = reader
+            .fetch_chunks(&keys, fields)
+            .await
+            .map_err(TemporalError::Copc)?;
+        let out: Vec<_> = chunks
+            .into_iter()
+            .zip(matches.into_iter().map(|(_, range)| range))
+            .collect();
+        Ok(out)
     }
 
-    /// Query points by time range only (no spatial filtering).
+    /// Query chunks by time range only (no spatial filtering).
     ///
-    /// Loads all hierarchy pages and temporal pages that overlap the time
-    /// range, then returns points within the time window.
-    pub async fn query_points_by_time<S: ByteSource>(
+    /// Like [`query_chunks`](Self::query_chunks) but loads the full
+    /// hierarchy and skips the bounding-box intersection test. Returns
+    /// every chunk whose node temporal range overlaps `[start, end]`,
+    /// each paired with its candidate index range.
+    pub async fn query_chunks_by_time<S: ByteSource>(
         &mut self,
         reader: &mut CopcStreamingReader<S>,
         start: GpsTime,
         end: GpsTime,
-    ) -> Result<Vec<las::Point>, TemporalError> {
+        fields: Fields,
+    ) -> Result<Vec<(Chunk, std::ops::Range<u32>)>, TemporalError> {
         reader
             .load_all_hierarchy()
             .await
@@ -328,17 +361,115 @@ impl TemporalCache {
             })
             .collect();
 
+        let keys: Vec<copc_streaming::VoxelKey> =
+            matches.iter().map(|(k, _)| *k).collect();
+        let chunks = reader
+            .fetch_chunks(&keys, fields)
+            .await
+            .map_err(TemporalError::Copc)?;
+        let out: Vec<_> = chunks
+            .into_iter()
+            .zip(matches.into_iter().map(|(_, range)| range))
+            .collect();
+        Ok(out)
+    }
+
+    // ==================== Simple API ====================
+    //
+    // One-line entry points for the common case. Internally wrap the
+    // fast API with `Fields::ALL` and materialize matching points.
+
+    /// Query points by time range and spatial bounds.
+    ///
+    /// Loads the relevant hierarchy and temporal pages, fetches matching
+    /// chunks, and returns only the points that fall inside both the time
+    /// window and the bounding box.
+    ///
+    /// Thin wrapper over [`query_chunks`](Self::query_chunks) with
+    /// `Fields::ALL`. Prefer `query_chunks` when you don't need every
+    /// field materialized as `las::Point` values.
+    ///
+    /// ```rust,ignore
+    /// let points = temporal.query_points(
+    ///     &mut reader, &query_box, start, end,
+    /// ).await?;
+    /// ```
+    pub async fn query_points<S: ByteSource>(
+        &mut self,
+        reader: &mut CopcStreamingReader<S>,
+        bounds: &copc_streaming::Aabb,
+        start: GpsTime,
+        end: GpsTime,
+    ) -> Result<Vec<las::Point>, TemporalError> {
+        let chunks_with_ranges = self
+            .query_chunks(reader, bounds, start, end, Fields::ALL)
+            .await?;
+
         let mut all_points = Vec::new();
-        for (key, range) in matches {
-            let chunk = reader
-                .fetch_chunk(&key)
-                .await
-                .map_err(TemporalError::Copc)?;
-            let points = reader
-                .read_points_range(&chunk, range)
-                .map_err(TemporalError::Copc)?;
-            let points = crate::filter_points_by_time(points, start, end);
-            all_points.extend(points);
+        for (chunk, range) in chunks_with_ranges {
+            // Zero-copy filter walk: inspect PointRef-level accessors in
+            // the candidate range and collect indices that match both the
+            // time window and the bounding box.
+            let start_idx = range.start as usize;
+            let end_idx = (range.end as usize).min(chunk.point_count());
+            let mut matching = Vec::with_capacity(end_idx - start_idx);
+            for i in start_idx..end_idx {
+                let p = chunk.cloud().point(i);
+                let Some(t) = p.gps_time() else {
+                    continue;
+                };
+                if t < start.0 || t > end.0 {
+                    continue;
+                }
+                let (x, y, z) = (p.x(), p.y(), p.z());
+                if x < bounds.min[0]
+                    || x > bounds.max[0]
+                    || y < bounds.min[1]
+                    || y > bounds.max[1]
+                    || z < bounds.min[2]
+                    || z > bounds.max[2]
+                {
+                    continue;
+                }
+                matching.push(i as u32);
+            }
+            all_points.extend(chunk.points_at(&matching)?);
+        }
+        Ok(all_points)
+    }
+
+    /// Query points by time range only (no spatial filtering).
+    ///
+    /// Loads all hierarchy pages and temporal pages that overlap the time
+    /// range, then returns points within the time window.
+    ///
+    /// Thin wrapper over [`query_chunks_by_time`](Self::query_chunks_by_time)
+    /// with `Fields::ALL`.
+    pub async fn query_points_by_time<S: ByteSource>(
+        &mut self,
+        reader: &mut CopcStreamingReader<S>,
+        start: GpsTime,
+        end: GpsTime,
+    ) -> Result<Vec<las::Point>, TemporalError> {
+        let chunks_with_ranges = self
+            .query_chunks_by_time(reader, start, end, Fields::ALL)
+            .await?;
+
+        let mut all_points = Vec::new();
+        for (chunk, range) in chunks_with_ranges {
+            let start_idx = range.start as usize;
+            let end_idx = (range.end as usize).min(chunk.point_count());
+            let mut matching = Vec::with_capacity(end_idx - start_idx);
+            for i in start_idx..end_idx {
+                let p = chunk.cloud().point(i);
+                let Some(t) = p.gps_time() else {
+                    continue;
+                };
+                if t >= start.0 && t <= end.0 {
+                    matching.push(i as u32);
+                }
+            }
+            all_points.extend(chunk.points_at(&matching)?);
         }
         Ok(all_points)
     }

@@ -198,6 +198,19 @@ impl HierarchyCache {
         !self.pending_pages.is_empty()
     }
 
+    /// Iterate the [`VoxelKey`]s anchoring the currently-pending hierarchy
+    /// pages. A pending page is a sub-tree whose entries live in a separate
+    /// page in the file that hasn't been fetched yet. The anchor key is the
+    /// node that owns the page pointer; resolving the page populates that
+    /// node's subtree.
+    ///
+    /// Useful to consumers that want to surface unloaded subtrees as
+    /// "proxy" nodes in their own data structure, then trigger
+    /// [`Self::load_pages_for_bounds`] / equivalent on demand.
+    pub fn pending_page_keys(&self) -> impl Iterator<Item = VoxelKey> + '_ {
+        self.pending_pages.iter().map(|p| p.key)
+    }
+
     /// Look up a hierarchy entry by key.
     pub fn get(&self, key: &VoxelKey) -> Option<&HierarchyEntry> {
         self.entries.get(key)
@@ -264,6 +277,7 @@ mod tests {
     use super::*;
     use byteorder::WriteBytesExt;
 
+    #[allow(clippy::too_many_arguments)]
     fn write_hierarchy_entry(
         buf: &mut Vec<u8>,
         level: i32,
