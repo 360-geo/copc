@@ -97,6 +97,12 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         self.hierarchy.has_pending_pages()
     }
 
+    /// Iterate the [`VoxelKey`]s anchoring the currently-pending hierarchy
+    /// pages. See [`HierarchyCache::pending_page_keys`](crate::HierarchyCache::pending_page_keys).
+    pub fn pending_page_keys(&self) -> impl Iterator<Item = VoxelKey> + '_ {
+        self.hierarchy.pending_page_keys()
+    }
+
     // --- Hierarchy loading ---
 
     /// Load the next batch of pending hierarchy pages.
