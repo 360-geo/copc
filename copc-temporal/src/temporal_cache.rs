@@ -312,14 +312,16 @@ impl TemporalCache {
             })
             .collect();
 
-        let mut out = Vec::with_capacity(matches.len());
-        for (key, range) in matches {
-            let chunk = reader
-                .fetch_chunk(&key, fields)
-                .await
-                .map_err(TemporalError::Copc)?;
-            out.push((chunk, range));
-        }
+        let keys: Vec<copc_streaming::VoxelKey> =
+            matches.iter().map(|(k, _)| *k).collect();
+        let chunks = reader
+            .fetch_chunks(&keys, fields)
+            .await
+            .map_err(TemporalError::Copc)?;
+        let out: Vec<_> = chunks
+            .into_iter()
+            .zip(matches.into_iter().map(|(_, range)| range))
+            .collect();
         Ok(out)
     }
 
@@ -359,14 +361,16 @@ impl TemporalCache {
             })
             .collect();
 
-        let mut out = Vec::with_capacity(matches.len());
-        for (key, range) in matches {
-            let chunk = reader
-                .fetch_chunk(&key, fields)
-                .await
-                .map_err(TemporalError::Copc)?;
-            out.push((chunk, range));
-        }
+        let keys: Vec<copc_streaming::VoxelKey> =
+            matches.iter().map(|(k, _)| *k).collect();
+        let chunks = reader
+            .fetch_chunks(&keys, fields)
+            .await
+            .map_err(TemporalError::Copc)?;
+        let out: Vec<_> = chunks
+            .into_iter()
+            .zip(matches.into_iter().map(|(_, range)| range))
+            .collect();
         Ok(out)
     }
 

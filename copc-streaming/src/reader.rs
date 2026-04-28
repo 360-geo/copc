@@ -190,6 +190,47 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         .await
     }
 
+    /// Fetch and decompress multiple chunks in one batched I/O call.
+    ///
+    /// Uses [`ByteSource::read_ranges`] to coalesce the fetches — HTTP
+    /// sources that override `read_ranges` with parallel requests or
+    /// range merging will issue far fewer round-trips than calling
+    /// [`fetch_chunk`](Self::fetch_chunk) in a loop.
+    ///
+    /// All keys must already be present in the loaded hierarchy; call
+    /// one of the `load_hierarchy_*` methods first.
+    pub async fn fetch_chunks(
+        &self,
+        keys: &[VoxelKey],
+        fields: Fields,
+    ) -> Result<Vec<Chunk>, CopcError> {
+        let entries: Vec<&HierarchyEntry> = keys
+            .iter()
+            .map(|k| self.hierarchy.get(k).ok_or(CopcError::NodeNotFound(*k)))
+            .collect::<Result<_, _>>()?;
+
+        let ranges: Vec<(u64, u64)> = entries
+            .iter()
+            .map(|e| (e.offset, e.byte_size as u64))
+            .collect();
+
+        let compressed_blobs = self.source.read_ranges(&ranges).await?;
+
+        compressed_blobs
+            .iter()
+            .zip(entries.iter())
+            .map(|(data, entry)| {
+                chunk::decompress_chunk(
+                    data,
+                    entry,
+                    &self.header.laz_vlr,
+                    &self.header.las_header,
+                    fields,
+                )
+            })
+            .collect()
+    }
+
     /// Keys in the currently-loaded hierarchy whose subtree intersects
     /// `bounds` and whose level is at most `max_level` (if provided).
     ///
@@ -223,10 +264,8 @@ impl<S: ByteSource> CopcStreamingReader<S> {
     /// Load hierarchy for `bounds`, fetch every intersecting chunk, and
     /// return them.
     ///
-    /// Convenience wrapper over [`load_hierarchy_for_bounds`](Self::load_hierarchy_for_bounds),
-    /// [`visible_keys`](Self::visible_keys), and [`fetch_chunk`](Self::fetch_chunk)
-    /// in a sequential loop. For parallel fetches, cancellation, or
-    /// prioritization, use those building blocks directly.
+    /// Uses [`fetch_chunks`](Self::fetch_chunks) to batch all chunk
+    /// fetches into a single [`ByteSource::read_ranges`] call.
     pub async fn query_chunks(
         &mut self,
         bounds: &crate::types::Aabb,
@@ -234,11 +273,7 @@ impl<S: ByteSource> CopcStreamingReader<S> {
     ) -> Result<Vec<Chunk>, CopcError> {
         self.load_hierarchy_for_bounds(bounds).await?;
         let keys = self.visible_keys(bounds, None);
-        let mut chunks = Vec::with_capacity(keys.len());
-        for key in keys {
-            chunks.push(self.fetch_chunk(&key, fields).await?);
-        }
-        Ok(chunks)
+        self.fetch_chunks(&keys, fields).await
     }
 
     /// Same as [`query_chunks`](Self::query_chunks) but limits the octree
@@ -252,11 +287,7 @@ impl<S: ByteSource> CopcStreamingReader<S> {
         self.load_hierarchy_for_bounds_to_level(bounds, max_level)
             .await?;
         let keys = self.visible_keys(bounds, Some(max_level));
-        let mut chunks = Vec::with_capacity(keys.len());
-        for key in keys {
-            chunks.push(self.fetch_chunk(&key, fields).await?);
-        }
-        Ok(chunks)
+        self.fetch_chunks(&keys, fields).await
     }
 
     // ==================== Simple API (tier 1) ====================

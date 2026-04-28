@@ -240,6 +240,81 @@ impl Chunk {
                 .collect(),
         )
     }
+
+    /// Decompress already-fetched compressed bytes into a [`Chunk`].
+    ///
+    /// Public counterpart to the sync inner that
+    /// [`CopcStreamingReader::fetch_chunks`](crate::CopcStreamingReader::fetch_chunks)
+    /// uses internally. Useful when the caller wants to issue the
+    /// [`ByteSource::read_range`](crate::ByteSource::read_range) on one
+    /// executor (e.g. the browser main thread) and run the CPU-bound
+    /// LAZ decompression on another (e.g. a Rayon worker pool).
+    ///
+    /// `compressed` must be exactly `entry.byte_size` bytes for the
+    /// chunk referenced by `entry.key`. `laz_vlr` and `header` come
+    /// from [`CopcStreamingReader::header`](crate::CopcStreamingReader::header)
+    /// and are immutable for the lifetime of the dataset, so a caller
+    /// can clone them out of the reader once and reuse them.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Fetch on one thread, hand bytes to a worker for decode:
+    /// let entry = reader.get(&key).unwrap().clone();
+    /// let bytes = reader
+    ///     .source()
+    ///     .read_range(entry.offset, entry.byte_size as u64)
+    ///     .await?;
+    /// // ... move bytes to a worker thread ...
+    /// let chunk = Chunk::decompress(
+    ///     &bytes,
+    ///     &entry,
+    ///     reader.header().laz_vlr(),
+    ///     reader.header().las_header(),
+    ///     Fields::Z | Fields::RGB,
+    /// )?;
+    /// ```
+    pub fn decompress(
+        compressed: &[u8],
+        entry: &HierarchyEntry,
+        laz_vlr: &LazVlr,
+        header: &las::Header,
+        fields: Fields,
+    ) -> Result<Self, CopcError> {
+        decompress_chunk(compressed, entry, laz_vlr, header, fields)
+    }
+}
+
+/// Decompress already-fetched compressed bytes into a [`Chunk`].
+///
+/// This is the sync counterpart to [`fetch_and_decompress`] — it skips
+/// the I/O step and works directly on a `&[u8]` buffer. Used by
+/// [`CopcStreamingReader::fetch_chunks`](crate::CopcStreamingReader::fetch_chunks)
+/// to decompress a batch of chunks that were fetched in a single
+/// [`ByteSource::read_ranges`] call.
+pub(crate) fn decompress_chunk(
+    compressed: &[u8],
+    entry: &HierarchyEntry,
+    laz_vlr: &LazVlr,
+    header: &las::Header,
+    fields: Fields,
+) -> Result<Chunk, CopcError> {
+    let format = *header.point_format();
+    let transforms = *header.transforms();
+
+    let record_len = format.len() as usize + format.extra_bytes as usize;
+    let decompressed_size = entry.point_count as usize * record_len;
+    let mut decompressed = vec![0u8; decompressed_size];
+
+    decompress_copc_chunk(compressed, &mut decompressed, laz_vlr, fields)?;
+
+    let cloud = PointCloud::from_raw_bytes(format, transforms, decompressed)?;
+
+    Ok(Chunk {
+        key: entry.key,
+        fields,
+        cloud,
+    })
 }
 
 /// Fetch and decompress a single chunk, decoding only the layers requested
@@ -254,23 +329,7 @@ pub(crate) async fn fetch_and_decompress(
     let compressed = source
         .read_range(entry.offset, entry.byte_size as u64)
         .await?;
-
-    let format = *header.point_format();
-    let transforms = *header.transforms();
-
-    let record_len = format.len() as usize + format.extra_bytes as usize;
-    let decompressed_size = entry.point_count as usize * record_len;
-    let mut decompressed = vec![0u8; decompressed_size];
-
-    decompress_copc_chunk(&compressed, &mut decompressed, laz_vlr, fields)?;
-
-    let cloud = PointCloud::from_raw_bytes(format, transforms, decompressed)?;
-
-    Ok(Chunk {
-        key: entry.key,
-        fields,
-        cloud,
-    })
+    decompress_chunk(&compressed, entry, laz_vlr, header, fields)
 }
 
 /// Decompress a single COPC chunk.
