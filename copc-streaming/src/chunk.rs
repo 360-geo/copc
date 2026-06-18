@@ -302,7 +302,13 @@ pub(crate) fn decompress_chunk(
     let format = *header.point_format();
     let transforms = *header.transforms();
 
-    let record_len = format.len() as usize + format.extra_bytes as usize;
+    // `Format::len()` already includes `extra_bytes`, so the on-disk record
+    // length is exactly `format.len()`. Adding `extra_bytes` again double-counts
+    // them: for files with extra dimensions the output buffer is oversized, the
+    // layered LAZ decoder keeps reading to fill the surplus, overruns the chunk,
+    // and `read_exact` fails with "failed to fill whole buffer". Files with
+    // `extra_bytes == 0` were unaffected, which is why only some COPC failed.
+    let record_len = format.len() as usize;
     let decompressed_size = entry.point_count as usize * record_len;
     let mut decompressed = vec![0u8; decompressed_size];
 
