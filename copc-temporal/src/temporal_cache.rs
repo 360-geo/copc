@@ -468,10 +468,9 @@ impl TemporalCache {
                 continue;
             };
             let mut matching = Vec::with_capacity(end_idx - start_idx);
-            for i in start_idx..end_idx {
-                let t = times[i];
+            for (offset, &t) in times[start_idx..end_idx].iter().enumerate() {
                 if t >= start.0 && t <= end.0 {
-                    matching.push(i as u32);
+                    matching.push((start_idx + offset) as u32);
                 }
             }
             all_points.extend(chunk.points_at(&matching)?);
