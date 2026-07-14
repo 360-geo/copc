@@ -312,8 +312,7 @@ impl TemporalCache {
             })
             .collect();
 
-        let keys: Vec<copc_streaming::VoxelKey> =
-            matches.iter().map(|(k, _)| *k).collect();
+        let keys: Vec<copc_streaming::VoxelKey> = matches.iter().map(|(k, _)| *k).collect();
         let chunks = reader
             .fetch_chunks(&keys, fields)
             .await
@@ -361,8 +360,7 @@ impl TemporalCache {
             })
             .collect();
 
-        let keys: Vec<copc_streaming::VoxelKey> =
-            matches.iter().map(|(k, _)| *k).collect();
+        let keys: Vec<copc_streaming::VoxelKey> = matches.iter().map(|(k, _)| *k).collect();
         let chunks = reader
             .fetch_chunks(&keys, fields)
             .await
