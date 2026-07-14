@@ -407,21 +407,25 @@ impl TemporalCache {
 
         let mut all_points = Vec::new();
         for (chunk, range) in chunks_with_ranges {
-            // Zero-copy filter walk: inspect PointRef-level accessors in
-            // the candidate range and collect indices that match both the
-            // time window and the bounding box.
+            // Column-snapshot filter walk: pull the x/y/z/gps_time columns
+            // once per chunk, then collect indices in the candidate range
+            // that match both the time window and the bounding box.
             let start_idx = range.start as usize;
             let end_idx = (range.end as usize).min(chunk.point_count());
+            let Some(times) = chunk.cloud().gps_time().map(|it| it.collect::<Vec<f64>>()) else {
+                // No GPS time column → no point can satisfy the time window.
+                continue;
+            };
+            let xs: Vec<f64> = chunk.cloud().x().collect();
+            let ys: Vec<f64> = chunk.cloud().y().collect();
+            let zs: Vec<f64> = chunk.cloud().z().collect();
             let mut matching = Vec::with_capacity(end_idx - start_idx);
             for i in start_idx..end_idx {
-                let p = chunk.cloud().point(i);
-                let Some(t) = p.gps_time() else {
-                    continue;
-                };
+                let t = times[i];
                 if t < start.0 || t > end.0 {
                     continue;
                 }
-                let (x, y, z) = (p.x(), p.y(), p.z());
+                let (x, y, z) = (xs[i], ys[i], zs[i]);
                 if x < bounds.min[0]
                     || x > bounds.max[0]
                     || y < bounds.min[1]
@@ -459,12 +463,13 @@ impl TemporalCache {
         for (chunk, range) in chunks_with_ranges {
             let start_idx = range.start as usize;
             let end_idx = (range.end as usize).min(chunk.point_count());
+            let Some(times) = chunk.cloud().gps_time().map(|it| it.collect::<Vec<f64>>()) else {
+                // No GPS time column → no point can satisfy the time window.
+                continue;
+            };
             let mut matching = Vec::with_capacity(end_idx - start_idx);
             for i in start_idx..end_idx {
-                let p = chunk.cloud().point(i);
-                let Some(t) = p.gps_time() else {
-                    continue;
-                };
+                let t = times[i];
                 if t >= start.0 && t <= end.0 {
                     matching.push(i as u32);
                 }

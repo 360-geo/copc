@@ -172,7 +172,7 @@ mod tests {
     use las::point::Format;
     use las::raw::point::{Flags, ScanAngle};
 
-    fn build_test_cloud(n: i32) -> las::PointCloud {
+    fn build_test_cloud(n: i32) -> las::PointData {
         let format = Format::new(7).unwrap();
         let unit = las::Transform {
             scale: 1.0,
@@ -206,10 +206,14 @@ mod tests {
             };
             rp.write_to(&mut buf, &format).unwrap();
         }
-        las::PointCloud::from_raw_bytes(format, transforms, buf).unwrap()
+        las::PointDataBuilder::new()
+            .with_format(format)
+            .with_transforms(transforms)
+            .build_from_bytes(buf)
+            .unwrap()
     }
 
-    fn make_chunk(cloud: las::PointCloud, fields: Fields) -> Chunk {
+    fn make_chunk(cloud: las::PointData, fields: Fields) -> Chunk {
         Chunk::new(VoxelKey::ROOT, fields, cloud)
     }
 

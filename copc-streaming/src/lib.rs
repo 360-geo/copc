@@ -136,4 +136,4 @@ pub use types::{Aabb, VoxelKey};
 // Re-exports of the handful of `las` types that appear in this crate's
 // public API. Users who only consume the types we return don't need to
 // add `las` as a direct dependency.
-pub use las::{Point, PointCloud, PointRef};
+pub use las::{Point, PointData};

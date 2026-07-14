@@ -136,7 +136,7 @@ dependencies = [
 [[package]]
 name = "las"
 version = "0.9.11"
-source = "git+https://github.com/jacovdbergh/las-rs?rev=833cf7ae0d8e98edf41bca358dedb68297e23215#833cf7ae0d8e98edf41bca358dedb68297e23215"
+source = "git+https://github.com/jacovdbergh/las-rs?rev=d3bffa632a191b70e10820f53bcc1d71a057e4d8#d3bffa632a191b70e10820f53bcc1d71a057e4d8"
 dependencies = [
  "byteorder",
  "chrono",

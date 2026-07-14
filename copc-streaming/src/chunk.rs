@@ -2,7 +2,7 @@
 
 use std::io::Cursor;
 
-use las::PointCloud;
+use las::{PointData, PointDataBuilder};
 use laz::LazVlr;
 use laz::record::{LayeredPointRecordDecompressor, RecordDecompressor};
 
@@ -14,7 +14,7 @@ use crate::types::{Aabb, VoxelKey};
 
 /// A decompressed point data chunk.
 ///
-/// A `Chunk` wraps a [`las::PointCloud`] along with the [`VoxelKey`] of the
+/// A `Chunk` wraps a [`las::PointData`] along with the [`VoxelKey`] of the
 /// octree node it came from and the [`Fields`] mask that was used to decode
 /// it. Column accessors (`intensity`, `gps_time`, `rgb`, …) are guarded by
 /// the mask and return `None` for fields that were not decoded.
@@ -27,12 +27,12 @@ pub struct Chunk {
     pub key: VoxelKey,
     /// Which fields were actually decompressed into this chunk.
     pub fields: Fields,
-    cloud: PointCloud,
+    cloud: PointData,
 }
 
 impl Chunk {
     /// Construct a `Chunk` from a [`VoxelKey`], a [`Fields`] mask, and a
-    /// [`las::PointCloud`].
+    /// [`las::PointData`].
     ///
     /// Normally you'll get chunks from
     /// [`CopcStreamingReader::fetch_chunk`](crate::CopcStreamingReader::fetch_chunk);
@@ -42,11 +42,11 @@ impl Chunk {
     /// were decoded into `cloud` — otherwise the chunk's field guards will
     /// hide columns that are actually valid, or (worse) expose columns
     /// that contain zero'd bytes for skipped layers.
-    pub fn new(key: VoxelKey, fields: Fields, cloud: PointCloud) -> Self {
+    pub fn new(key: VoxelKey, fields: Fields, cloud: PointData) -> Self {
         Self { key, fields, cloud }
     }
 
-    /// Borrow the underlying [`las::PointCloud`] — an **unchecked** escape
+    /// Borrow the underlying [`las::PointData`] — an **unchecked** escape
     /// hatch to the raw byte-level accessors in `las`.
     ///
     /// Use this when [`Chunk`]'s higher-level methods don't expose what
@@ -64,7 +64,7 @@ impl Chunk {
     /// Prefer the [`Chunk`] methods ([`rgb`](Self::rgb),
     /// [`gps_time`](Self::gps_time), etc.) — they return `None` when the
     /// field is absent, making the hazard impossible to hit accidentally.
-    pub fn cloud(&self) -> &PointCloud {
+    pub fn cloud(&self) -> &PointData {
         &self.cloud
     }
 
@@ -92,7 +92,10 @@ impl Chunk {
         if self.fields != Fields::ALL {
             return Err(CopcError::PartialDecode(self.fields));
         }
-        self.cloud.to_points().map_err(CopcError::Las)
+        self.cloud
+            .points()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(CopcError::Las)
     }
 
     /// Materialize `las::Point` values only at the given indices.
@@ -141,7 +144,13 @@ impl Chunk {
         if !self.fields.contains(Fields::Z) {
             return None;
         }
-        Some(self.cloud.iter().map(|p| [p.x(), p.y(), p.z()]))
+        Some(
+            self.cloud
+                .x()
+                .zip(self.cloud.y())
+                .zip(self.cloud.z())
+                .map(|((x, y), z)| [x, y, z]),
+        )
     }
 
     /// Intensity column, or `None` if [`Fields::INTENSITY`] was not set
@@ -314,7 +323,10 @@ pub(crate) fn decompress_chunk(
 
     decompress_copc_chunk(compressed, &mut decompressed, laz_vlr, fields)?;
 
-    let cloud = PointCloud::from_raw_bytes(format, transforms, decompressed)?;
+    let cloud = PointDataBuilder::new()
+        .with_format(format)
+        .with_transforms(transforms)
+        .build_from_bytes(decompressed)?;
 
     Ok(Chunk {
         key: entry.key,
@@ -370,11 +382,11 @@ mod tests {
     use las::point::Format;
     use las::raw::point::{Flags, ScanAngle};
 
-    /// Build a `PointCloud` in format 7 (has gps_time + rgb) with `n` points
+    /// Build a `PointData` in format 7 (has gps_time + rgb) with `n` points
     /// whose fields are a function of their index: `x = i, y = i + 1,
     /// z = i + 2, intensity = 100 + i, gps_time = 1000 + i, rgb = (i, i, i)`.
     /// Unit transforms (scale=1, offset=0) so raw == world for easy asserts.
-    fn build_test_cloud(n: i32) -> las::PointCloud {
+    fn build_test_cloud(n: i32) -> las::PointData {
         let format = Format::new(7).unwrap();
         let unit = las::Transform {
             scale: 1.0,
@@ -409,10 +421,14 @@ mod tests {
             };
             rp.write_to(&mut buf, &format).unwrap();
         }
-        las::PointCloud::from_raw_bytes(format, transforms, buf).unwrap()
+        PointDataBuilder::new()
+            .with_format(format)
+            .with_transforms(transforms)
+            .build_from_bytes(buf)
+            .unwrap()
     }
 
-    fn make_chunk(cloud: las::PointCloud, fields: Fields) -> Chunk {
+    fn make_chunk(cloud: las::PointData, fields: Fields) -> Chunk {
         Chunk {
             key: VoxelKey::ROOT,
             fields,
