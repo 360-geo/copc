@@ -11,7 +11,7 @@ readme = "../README.md"
 
 [dependencies]
 copc-streaming = { path = "../copc-streaming" }
-las = { git = "https://github.com/jacovdbergh/las-rs", rev = "d3bffa632a191b70e10820f53bcc1d71a057e4d8", features = ["laz"] }
+las = { version = "0.10", features = ["laz"] }
 byteorder = "1"
 thiserror = "2"
 [dev-dependencies]

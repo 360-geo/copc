@@ -13,7 +13,7 @@ readme = "../README.md"
 byteorder = "1"
 thiserror = "2"
 bitflags = "2"
-las = { git = "https://github.com/jacovdbergh/las-rs", rev = "d3bffa632a191b70e10820f53bcc1d71a057e4d8", features = ["laz"] }
+las = { version = "0.10", features = ["laz"] }
 laz = "0.12"
 
 [dev-dependencies]
